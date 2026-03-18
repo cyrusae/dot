@@ -88,8 +88,30 @@ Call journal exactly once at the end of your turn.
 """
 
 
+def read_new_messages(messages_log: Path, prior_size: int) -> list[str]:
+    """Return messages written to messages_log after prior_size bytes."""
+    if not messages_log.exists():
+        return []
+    new_content = messages_log.read_bytes()[prior_size:]
+    messages = []
+    for line in new_content.decode("utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            if entry.get("text"):
+                messages.append(entry["text"])
+        except json.JSONDecodeError:
+            continue
+    return messages
+
+
 def invoke_claude(prompt: str) -> None:
     """Invoke Claude Code headlessly with the constructed prompt."""
+    messages_log = HOME / "logs" / "messages.jsonl"
+    prior_size = messages_log.stat().st_size if messages_log.exists() else 0
+
     cmd = [
         "claude", "-p", prompt,
         "--mcp-config", str(MCP_CONFIG),
@@ -121,10 +143,11 @@ def invoke_claude(prompt: str) -> None:
         result = json.loads(proc.stdout)
         session = result.get("session_id", "?")
         print(f"[orchestrator] Done. Session: {session}", file=sys.stderr)
-        if result.get("result"):
-            print(result["result"])
     except json.JSONDecodeError:
         pass
+
+    for msg in read_new_messages(messages_log, prior_size):
+        print(f"Dot: {msg}")
 
 
 if __name__ == "__main__":

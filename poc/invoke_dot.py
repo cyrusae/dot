@@ -120,9 +120,7 @@ def invoke_claude(prompt: str) -> None:
     try:
         result = json.loads(proc.stdout)
         session = result.get("session_id", "?")
-        cost = result.get("cost_usd")
-        cost_str = f"  cost=${cost:.4f}" if cost is not None else ""
-        print(f"[orchestrator] Done. Session: {session}{cost_str}", file=sys.stderr)
+        print(f"[orchestrator] Done. Session: {session}", file=sys.stderr)
     except json.JSONDecodeError:
         pass
 

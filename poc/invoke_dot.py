@@ -94,7 +94,7 @@ def invoke_claude(prompt: str) -> None:
         "claude", "-p", prompt,
         "--mcp-config", str(MCP_CONFIG),
         "--allowedTools", "mcp__dot__*",
-        "--output-format", "stream-json",
+        "--output-format", "json",
         "--dangerously-skip-permissions",
     ]
 
@@ -115,24 +115,16 @@ def invoke_claude(prompt: str) -> None:
         if proc.stderr:
             print(f"[orchestrator] stderr: {proc.stderr[:500]}",
                   file=sys.stderr)
+        return
 
-    # Parse stream-json output for tool calls
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-            event_type = event.get("type", "")
-            if event_type == "tool_use":
-                tool_name = event.get("tool", {}).get("name", "?")
-                print(f"[orchestrator] Tool call: {tool_name}",
-                      file=sys.stderr)
-            elif event_type == "result":
-                print(f"[orchestrator] Done. Session: {event.get('session_id', '?')}",
-                      file=sys.stderr)
-        except json.JSONDecodeError:
-            continue
+    try:
+        result = json.loads(proc.stdout)
+        session = result.get("session_id", "?")
+        cost = result.get("cost_usd")
+        cost_str = f"  cost=${cost:.4f}" if cost is not None else ""
+        print(f"[orchestrator] Done. Session: {session}{cost_str}", file=sys.stderr)
+    except json.JSONDecodeError:
+        pass
 
 
 if __name__ == "__main__":

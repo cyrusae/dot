@@ -121,6 +121,8 @@ def invoke_claude(prompt: str) -> None:
         result = json.loads(proc.stdout)
         session = result.get("session_id", "?")
         print(f"[orchestrator] Done. Session: {session}", file=sys.stderr)
+        if result.get("result"):
+            print(result["result"])
     except json.JSONDecodeError:
         pass
 

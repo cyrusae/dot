@@ -223,6 +223,20 @@ async def list_tools():
                 "required": ["path"],
             },
         ),
+        Tool(
+            name="read_inbox",
+            description="Read messages sent to Dot from the inbox queue (logs/inbox.jsonl). Call this at the start of turns when you expect input from Cyrus.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "clear": {
+                        "type": "boolean",
+                        "description": "Mark messages as read after returning them",
+                        "default": False,
+                    }
+                },
+            },
+        ),
     ]
 
 
@@ -238,6 +252,8 @@ async def call_tool(name: str, arguments: dict):
         return await handle_journal(arguments)
     elif name == "list_blocks":
         return await handle_list_blocks(arguments)
+    elif name == "read_inbox":
+        return await handle_read_inbox(arguments)
     elif name.startswith("vault_"):
         handler_name = f"handle_{name}"
         handler = globals().get(handler_name)
@@ -283,6 +299,26 @@ async def handle_read_block(args: dict):
     return [TextContent(type="text", text=content)]
 
 
+def _git_commit_block(name: str, block_path: Path):
+    import subprocess
+    repo_root = block_path.parent.parent
+    try:
+        # git -C {block_path.parent.parent} add {block_path}
+        subprocess.run(
+            ["git", "-C", str(repo_root), "add", str(block_path)],
+            capture_output=True,
+            text=True
+        )
+        # git -C {block_path.parent.parent} commit -m 'block: update {name}'
+        subprocess.run(
+            ["git", "-C", str(repo_root), "commit", "-m", f"block: update {name}"],
+            capture_output=True,
+            text=True
+        )
+    except Exception as e:
+        print(f"Git commit failed for block '{name}': {e}", file=sys.stderr)
+
+
 async def handle_write_block(args: dict):
     import yaml
 
@@ -305,6 +341,8 @@ async def handle_write_block(args: dict):
     }
     path = BLOCKS_DIR / f"{name}.yaml"
     path.write_text(yaml.safe_dump(block, sort_keys=False), encoding="utf-8")
+
+    _git_commit_block(name, path)
 
     return [TextContent(type="text", text=f"Block '{name}' written.")]
 
@@ -684,6 +722,58 @@ async def handle_vault_related(args: dict):
         "related": scores[:limit],
         "backend": "filesystem"
     }, indent=2))]
+
+
+async def handle_read_inbox(args: dict):
+    clear = args.get("clear", False)
+    inbox_path = LOGS_DIR / "inbox.jsonl"
+
+    if not inbox_path.exists():
+        return [TextContent(type="text", text="Inbox is empty.")]
+
+    messages = []
+    unread_messages = []
+
+    try:
+        with inbox_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    msg = json.loads(line)
+                    messages.append(msg)
+                    if not msg.get("read", False):
+                        unread_messages.append(msg)
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error reading inbox: {e}")]
+
+    if not unread_messages:
+        return [TextContent(type="text", text="No unread messages.")]
+
+    formatted = []
+    for msg in unread_messages:
+        ts = msg.get("timestamp", "unknown")
+        sender = msg.get("from", "unknown")
+        text = msg.get("text", "")
+        formatted.append(f"[{ts}] from {sender}: {text}")
+
+    result_text = "\n".join(formatted)
+
+    if clear:
+        # Rewrite the file with marked messages
+        for msg in messages:
+            if not msg.get("read", False):
+                msg["read"] = True
+        try:
+            with inbox_path.open("w", encoding="utf-8") as f:
+                for msg in messages:
+                    f.write(json.dumps(msg) + "\n")
+        except Exception as e:
+            result_text += f"\n\n(Note: Failed to mark as read: {e})"
+
+    return [TextContent(type="text", text=result_text)]
 
 
 async def main():

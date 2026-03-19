@@ -1,0 +1,37 @@
+{
+  "what_we_decided": [
+    "2026-03-18 - OG Strix uses Letta ONLY as a versioned key-value store for hot memory blocks (append-only SQLite, latest-version-wins). NOT as agent framework. Claude Code SDK is the actual agent loop. Open-strix replaced this Letta dependency entirely with YAML files + git versioning.",
+    "2026-03-18 - Claude-to-IM is not suitable for Dot. It solves supervised interactive coding sessions, not autonomous agent communication. Open-strix's simpler send_message-as-tool pattern is the right model.",
+    "2026-03-18 - Open-strix is likely to become abandonware (proof-of-concept, not the version the author actually uses). This argues FOR forking and owning, not AGAINST using it as a starting point.",
+    "2026-03-18 - Target architecture is Hybrid A+B: fork open-strix for infrastructure (Discord, scheduling, event queue, journal, git sync, circuit breakers) but replace deepagents inference layer with Claude Code SDK invocation. Expose Dot's custom tools as MCP server that Claude Code calls.",
+    "2026-03-18 - Model-aware scheduling: Claude for human-initiated events, Gemini CLI as fallback for autonomous perch-time ticks when Claude subscription limits are exhausted.",
+    "2026-03-18 - Obsidian vault replaces open-strix's flat state/ directory for warm and cold memory. Retains the Obsidian sidecar deployment spec already written. Hot memory blocks remain as YAML files (open-strix pattern) or append-only SQLite (Letta-inspired), decision deferred.",
+    "2026-03-18 - Proof of concept approach: build minimal MCP server with toy tools (send_message, read_block, write_block, journal), invoke via claude -p headless mode with --mcp-config and --allowedTools, validate that Claude Code autonomously completes a multi-step task using custom tools under Pro subscription auth.",
+    "2026-03-18 - PoC is deliberately minimal \u2014 validates the CLI-as-harness + MCP-tools pattern before committing to full open-strix fork. Discord, scheduling, Obsidian, Gemini fallback are all deferred to post-validation."
+  ],
+  "what_we_built": [],
+  "what_we_need_to_decide": [
+    "2026-03-18 - Can Claude Code SDK be invoked programmatically with custom MCP tools and have it run an autonomous tool-calling loop? This is the critical validation for the hybrid architecture.",
+    "2026-03-18 - What does the Claude Code subscription authentication flow look like when automated on a headless server? Tim SSHes in weekly to run /login. Can this be scripted or does it require interactive browser auth?",
+    "2026-03-18 - Can Gemini CLI serve as a genuine fallback for the same MCP tools, or do tool-calling conventions differ enough to require a compatibility shim?",
+    "2026-03-18 - Hot memory block storage: YAML files + git (open-strix pattern, simpler) vs append-only SQLite (Letta pattern, version history without git archaeology)? Deferred pending practical experience.",
+    "2026-03-18 - How to reconcile this architecture exploration with the main Dot project state file and existing specs (Obsidian sidecar, vault tool call spec)? Need to update the main branch of decisions.",
+    "2026-03-18 - What from Letta's ecosystem is still worth harvesting? LettaBot messaging patterns for Discord? Social agent patterns for Bluesky? Or does open-strix + AT Protocol SDK cover those needs?",
+    "2026-03-18 - Does claude -p with --mcp-config and subscription auth actually work end-to-end for autonomous tool loops? This is the single gating question for the hybrid architecture."
+  ],
+  "what_we_resolved": [],
+  "important_files": [
+    "2026-03-18 - open-strix repo (cloned) - /home/claude/open-strix - MIT licensed reference architecture",
+    "2026-03-18 - Tim Kellogg blog posts - timkellogg.me/blog/2025/12/15/strix (main), /2025/12/30/memory-arch (memory architecture), /2026/01/09/viable-systems (VSM + Claude subscription trick)"
+  ],
+  "context": [
+    "2026-03-18 - Mid-March 2026 architectural re-evaluation triggered by discovering Tim Kellogg's Strix/open-strix project. Exploring whether to shift from Letta-based architecture to open-strix fork with Claude Code SDK as inference layer.",
+    "2026-03-18 - Financial constraint is primary: user is unemployed with upcoming surgery. Claude Pro subscription (0/mo) with Gemini CLI fallback is the target cost model, not API credits.",
+    "2026-03-18 - Original Dot architecture: Letta framework + Claude API + Ollama embeddings + PostgreSQL/pgvector + Obsidian vault + K3s cluster. Nine-block memory architecture, calibration-first identity development, Discord bridge as near-term milestone.",
+    "2026-03-18 - Reference implementations studied: open-strix (MIT, generalized version of Strix using deepagents/LangGraph), OG Strix (closed, Claude Code SDK + Letta for hot memory blocks only + Discord), Claude-to-IM (TypeScript bridge, too interactive/supervised for autonomous agent use case).",
+    "2026-03-18 - Key open-strix code seams for the hybrid: _create_agent() and _process_event() in app.py are where deepagents gets replaced with CLI invocation. _render_prompt() builds the context string. _build_tools() in tools.py defines all tools that would become MCP tools.",
+    "2026-03-18 - Tim Kellogg's memory architecture post (Dec 30 2025) reveals OG Strix uses append-only SQLite for blocks, three-tier memory (Core=always loaded, Indices=always loaded pointers, Files=on demand), and experienced collapse into timestamp maintenance when given open-ended autonomy without concrete task gradients.",
+    "2026-03-18 - Strix's collapse/recovery story is directly relevant to Dot's calibration design: identity scaffolding + concrete queued tasks prevent attractor collapse. Open-ended grants of autonomy without gradients lead to low-energy behavioral modes. Dissipative structures framework (Prigogine) provides theoretical grounding."
+  ],
+  "subsystem": "architecture-crisis"
+}

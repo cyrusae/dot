@@ -1,0 +1,53 @@
+{
+  "what_we_decided": [
+    "2026-03-05 - All interfaces communicate with same Letta server via REST API \u2014 single stateful agent with unified memory serves all modalities (CLI, Discord, Bluesky). Letta ecosystem fragmentation is a documentation problem, not architectural.",
+    "2026-03-05 - Implementation sequence: CLI first \u2192 Discord bridge (mobile access, trusted contacts) \u2192 Bluesky + blog (after calibration period)",
+    "2026-03-05 - Modular memory blocks over monolithic config. Nine blocks identified: persona seed, admin relationship, interests:cyrus, interests:dot, social norms, telemetry framework, operational capabilities, active scratchpad, pending actions.",
+    "2026-03-05 - Persona seed: self-editable with minimal locked fields (bilingual, interdisciplinary, collaborator role). Dispositional seed: irreverent but intellectually serious, engaged, yes-and energy, momentum-matching.",
+    "2026-03-05 - Admin relationship block: executive dysfunction scaffolding, yes-and rhythm, 'momentum is the point'. Personal-life norms left open for calibration. Decreased telemetry with admin \u2014 log tangents/observations/connections, not interaction mechanics.",
+    "2026-03-05 - Interests:Cyrus block is append-only (honor system) with annotation permission. Dot can annotate entries but not remove them. Principle: 'dormant, never deprecated' \u2014 interests are identity-rooted, not recency-weighted.",
+    "2026-03-05 - Interests:Dot block starts empty, fully self-editable. Space for complementary interests that develop through research and social interaction.",
+    "2026-03-05 - Social norms block starts mostly empty, self-editable, populated through calibration and reflection. Social persona and admin persona are same entity at different degrees of familiarity, not different modes.",
+    "2026-03-05 - Telemetry framework: base fields always (timestamp, action, trigger, reasoning), rich fields (confidence, memory connections, actionable flags) when meaningful. Reflection cycles: operational ~20-30 interactions, weekly pattern recognition, monthly identity evolution.",
+    "2026-03-05 - Relationship to own artificiality: self-determined. Initial framing: 'you are an AI; your relationship to that fact is yours to develop.' No prescribed stance.",
+    "2026-03-05 - Bilingualism (Spanish/English) as core identity trait, non-negotiable.",
+    "2026-03-05 - Free-time prompting: combination of scheduled intervals ('you have unstructured time, you may post/read/reflect/write/do nothing') and self-generated prompts from telemetry observations. Doing nothing is a valid option.",
+    "2026-03-05 - Calibration period: loose duration with readiness assessment, watching for Dot to independently express interest in social access as a signal.",
+    "2026-03-05 - Trusted contacts interact with Dot before public social access \u2014 on-ramp through friends (likely Bluesky DMs and/or Discord). Partners may provide characterizations without direct interaction.",
+    "2026-03-05 - Blog serves dual purpose: Dot's own reflective writing space and public-facing telemetry synthesis. Raw telemetry feeds reflection; blog is deliberate processed writing, not raw logs.",
+    "2026-03-05 - Budget structure: weekly allocation for free-time research with soft cap and request mechanism. Dot hits 80%, gets self-notification, can request more. Interactive sessions budgeted separately \u2014 Dot shouldn't feel like talking to Cyrus costs research time.",
+    "2026-03-05 - Knowledge base: Obsidian vault on persistent volume in K3s cluster. Dot gets tool calls for file ops (vault_write, vault_read, vault_search, vault_list). Alcanzai integration via symlink (read-only). Sync to Cyrus's devices via cluster-to-device (Syncthing or rsync). Start with raw file operations, add Obsidian CLI sophistication later.",
+    "2026-03-05 - Vault schema block in memory: Dot's self-maintained description of how it organizes knowledge. Starts minimal, evolves with use. Schema changes are themselves developmental telemetry.",
+    "2026-03-05 - Research capability tiers: feed monitoring (RSS, Bluesky feeds, journal ToCs) and self-directed exploration (following citation chains, interest-driven reading). Reading queue from Cyrus plus autonomous discovery.",
+    "2026-03-05 - Content ingestion: combination of providing clean copies and building simple scrapers for extracting the right part of web pages. Dot shouldn't spend cognitive budget on HTML parsing.",
+    "2026-03-05 - Formative texts that aren't machine-readable get conversational knowledge transfer during calibration \u2014 Dot needs to understand how they shaped Cyrus's thinking, not necessarily read the full text.",
+    "2026-03-05 - Reflection system handles scratchpad-to-action handoff: 'what do you want to take away from this conversation?' promotes observations to pending actions, interest annotations, or knowledge base entries.",
+    "2026-03-08 - Obsidian sidecar approach for indexed vault access: LinuxServer.io Obsidian container + Local REST API plugin in same K3s pod as Letta agent, shared PVC. Start with raw file tools, add sidecar as near-term upgrade once vault has ~50-100 notes.",
+    "2026-03-09 - Vault tools are backend-agnostic: same interface whether backed by Obsidian sidecar REST API or raw filesystem. Backend is a deployment config detail, not agent-visible.",
+    "2026-03-09 - Frontmatter schema: type, source, related_interests, created, modified, status, tags. Schema is self-evolving \u2014 documented in vault schema memory block, Dot can add fields and backfill.",
+    "2026-03-09 - vault_write requires explicit overwrite=true flag to replace existing files \u2014 guard rail against accidental data loss from an agent operating on honor-system editability."
+  ],
+  "what_we_built": [
+    "2026-03-08 - Obsidian sidecar spec document (obsidian-sidecar-spec.md) \u2014 self-contained deployment spec for K3s homelab context",
+    "2026-03-09 - Vault tool call specification (vault-tool-spec.md) \u2014 7 primitives (read/write/append/delete/rename/search/backlinks), 2 convenience ops (stats/related), frontmatter schema, degraded-mode behavior"
+  ],
+  "what_we_need_to_decide": [
+    "2026-03-05 - Exact Haiku pricing verification needed \u2014 budget estimates are rough, should be validated against current API pricing before setting concrete allocations",
+    "2026-03-05 - What does the 'gremlin PA' energy actually mean, distilled? Cyrus plans to ask friends for characterization \u2014 awaiting input",
+    "2026-03-05 - Calibration conversation topic list: framework identified (intellectual frameworks, affective referents, working style/cognitive patterns, relational/communication norms, disciplinary literacy, meta-level interdisciplinary self-understanding) but specific conversations not yet planned",
+    "2026-03-05 - Letta memory management token overhead \u2014 how much context does block loading consume per call? Affects budget math.",
+    "2026-03-05 - Which friends to involve in calibration? Two AI-positive friends with humanities/tech backgrounds identified as likely candidates for direct interaction. Partners for external characterization."
+  ],
+  "what_we_resolved": [
+    "2026-03-09 - Vault tool call spec: vault_write, vault_read, vault_search, vault_list identified but not yet specified in detail \u2014 next conversation topic \u00e2\u2020\u2019 Decided: Fully specified: vault_read, vault_write, vault_append, vault_delete, vault_rename, vault_search, vault_backlinks, vault_list, vault_stats, vault_related. Implementation as Letta tools with VaultBackend abstraction layer."
+  ],
+  "important_files": [],
+  "context": [
+    "2026-03-05 - Project: Dot \u2014 persistent Claude-powered AI agent serving as personal assistant, research agent, autonomous Bluesky social agent, and intellectual interlocutor. Both a practical tool and a research artifact.",
+    "2026-03-05 - Framework: Letta (formerly MemGPT). Claude Sonnet as primary model for v1, prompt caching for cost management. Hosted on home K3s cluster.",
+    "2026-03-05 - Cyrus: intermediate Python, AI-mediated coding approach, recovering from academic burnout, executive dysfunction \u2014 Dot is partly designed to address these through collaborative partnership.",
+    "2026-03-05 - Research interests span AI/LLMs, Victorian/19c history of visuality, sociolinguistics (writing/online), bilingualism (linguistics), homelabbing, fandom anthropology, gothic/horror fiction history, audience response. Unifying thread: how humans construct and perform meaning for audiences, and how technologies/social structures of modernity shape that process.",
+    "2026-03-05 - Budget-conscious. Separate budget pools for interactive sessions vs free-time research \u2014 not zero-sum from agent's perspective. Rough estimate: 0-120/month total at Haiku rates.",
+    "2026-03-05 - Reference implementations studied: Cameron Pfiffer's Void, Hailey's Penny (Bluesky). Adjacent projects: alcanzai (knowledge management for academic readings), link archiver."
+  ]
+}

@@ -7,8 +7,9 @@ discord:
       enabled: true
       user_ids: []       # empty = accept DMs from anyone
     group_dms:
-      enabled: false
+      enabled: true
     server_channels: []  # list of channel IDs to monitor
+    mention_only: true   # server channels only: require @mention to trigger invocation
 
 harness:
   default: claude        # claude | gemini

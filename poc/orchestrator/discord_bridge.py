@@ -63,7 +63,12 @@ class DiscordBridge(discord.Client):
         # Allow specific server channels
         if hasattr(message.channel, "guild"):
             server_channels = allowed.get("server_channels", [])
-            return message.channel.id in server_channels
+            if message.channel.id not in server_channels:
+                return False
+            mention_only = allowed.get("mention_only", True)
+            if mention_only and self.user not in message.mentions:
+                return False
+            return True
 
         return False
 

@@ -271,6 +271,20 @@ async def list_tools():
                 "required": ["name"],
             },
         ),
+        Tool(
+            name="search_journal",
+            description="Search journal entries by keyword and/or date range. Returns matching entries in reverse chronological order.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Text to search for across all journal fields (case-insensitive). Omit to return all entries in range."},
+                    "since": {"type": "string", "description": "ISO date string (YYYY-MM-DD or full ISO timestamp). Only return entries at or after this time."},
+                    "until": {"type": "string", "description": "ISO date string (YYYY-MM-DD or full ISO timestamp). Only return entries at or before this time."},
+                    "limit": {"type": "integer", "description": "Maximum number of entries to return (default 20).", "default": 20},
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -292,6 +306,8 @@ async def call_tool(name: str, arguments: dict):
         return await handle_schedule_job(arguments)
     elif name == "unschedule_job":
         return await handle_unschedule_job(arguments)
+    elif name == "search_journal":
+        return await handle_search_journal(arguments)
     elif name.startswith("vault_"):
         handler_name = f"handle_{name}"
         handler = globals().get(handler_name)
@@ -905,6 +921,62 @@ async def handle_unschedule_job(args: dict):
         return [TextContent(type="text", text=f"Error writing scheduler.yaml: {e}")]
 
     return [TextContent(type="text", text=f"Job '{name}' unscheduled successfully.")]
+
+
+async def handle_search_journal(args: dict):
+    journal_path = LOGS_DIR / "journal.jsonl"
+    if not journal_path.exists():
+        return [TextContent(type="text", text="(no journal entries)")]
+
+    query = args.get("query", "").lower()
+    since = args.get("since", "")
+    until = args.get("until", "")
+    limit = int(args.get("limit", 20))
+
+    entries = []
+    for line in journal_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    # Filter by date range
+    if since or until:
+        filtered = []
+        for entry in entries:
+            ts = entry.get("timestamp", "")
+            if since and ts < since:
+                continue
+            if until and ts > until:
+                continue
+            filtered.append(entry)
+        entries = filtered
+
+    # Filter by query
+    if query:
+        entries = [
+            e for e in entries
+            if query in json.dumps(e).lower()
+        ]
+
+    # Most recent first, capped at limit
+    entries = entries[-limit:][::-1]
+
+    if not entries:
+        return [TextContent(type="text", text="(no matching journal entries)")]
+
+    rendered = []
+    for entry in entries:
+        rendered.append(
+            f"timestamp: {entry.get('timestamp', '?')}\n"
+            f"user_wanted: {entry.get('user_wanted', '')}\n"
+            f"agent_did: {entry.get('agent_did', '')}\n"
+            f"predictions: {entry.get('predictions', '')}"
+        )
+    return [TextContent(type="text", text="\n\n".join(rendered))]
 
 
 async def main():

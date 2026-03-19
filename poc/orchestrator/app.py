@@ -61,7 +61,11 @@ async def _event_worker(queue: asyncio.Queue, discord_bridge: DiscordBridge | No
         try:
             prior_size = MESSAGES_LOG.stat().st_size if MESSAGES_LOG.exists() else 0
 
-            prompt = build_prompt(event.prompt, tick_type=event.tick_type)
+            event_text = event.prompt
+            if event.source_platform == "discord" and event.author:
+                event_text = f"[from: {event.author} on discord (id: {event.author_id})]\n{event.prompt}"
+
+            prompt = build_prompt(event_text, tick_type=event.tick_type)
             harness = _get_harness(event, default_harness)
 
             print(f"[coordinator] Processing {event.event_type} via {harness}", flush=True)

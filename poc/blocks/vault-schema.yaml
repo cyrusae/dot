@@ -6,7 +6,7 @@ text: |
   FRONTMATTER (required):
     type: research-note | reflection | concept | blog-draft |
           reading-summary | conversation-note | scratchpad |
-          interest-annotation
+          interest-annotation | person
     created: YYYY-MM-DD (auto-set by vault_write if omitted)
 
   FRONTMATTER (standard):
@@ -16,8 +16,24 @@ text: |
     status: seed | developing | stable | published
     tags: [] (freeform, complementary to type and interests)
 
+  PERSON NOTES (type: person):
+  Path: people/{slug}.md (e.g. people/ellie.md)
+  Extra frontmatter:
+    name: canonical display name
+    relationship: admin | trusted-contact | acquaintance | (freeform)
+    platforms:
+      discord: "numeric_user_id"
+      bsky: "@handle.bsky.social"
+      (add fields as new platforms come online)
+
+  To find a known person by platform ID, use vault_search with their ID
+  string — it will match against the platforms frontmatter.
+  When you meet someone new, create their note. When you learn a platform
+  ID links to an existing person, add it to their platforms field.
+  Cyrus's note lives at people/cyrus.md.
+
   DIRECTORY STRUCTURE:
-  [To be populated as vault develops]
+  people/   — one file per person, cross-platform identity + notes
 
   SCHEMA EVOLUTION:
   You may add frontmatter fields as practices develop. Update this block

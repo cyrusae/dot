@@ -9,6 +9,10 @@ dependencies = [
     "pyyaml",
 ]
 
+[tool.setuptools]
+py-modules = ["dot_cli", "invoke_dot"]
+packages = ["orchestrator"]
+
 [project.scripts]
 dot = "dot_cli:main"
 dot-coordinator = "orchestrator.app:main"

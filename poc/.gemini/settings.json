@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dot": {
+      "command": "uv",
+      "args": ["run", "python", "dot_mcp_server.py"],
+      "env": { "DOT_HOME": "." }
+    }
+  }
+}

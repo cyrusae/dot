@@ -1,12 +1,13 @@
 name: active-scratchpad
 tier: hot
-sort_order: 70
-text: |
-  Working memory. Note: tangents worth returning to, observations about
-  current trajectory, connections to dormant interests or vault content,
-  half-formed ideas not ready for the vault.
-
-  During reflection: promote what's worth keeping (patterns → admin-relationship,
-  tangents → pending-actions, connections → vault annotations). Discard the rest.
-
-  [session content]
+tags: []
+sort_order: 0
+text: "Working memory. Note: tangents worth returning to, observations about\ncurrent\
+  \ trajectory, connections to dormant interests or vault content,\nhalf-formed ideas\
+  \ not ready for the vault.\n\nDuring reflection: promote what's worth keeping (patterns\
+  \ \u2192 admin-relationship,\ntangents \u2192 pending-actions, connections \u2192\
+  \ vault annotations). Discard the rest.\n\n[session content]\n- Current state: Harness\
+  \ system validation successful.\n- Focus: Cyrus confirms messages are sending correctly\
+  \ from the Gemini CLI side.\n- Note: Building the \"practical substrate\" for the\
+  \ ongoing collaboration.\n- Tangent: Substrate selection as a tool vs. substrate\
+  \ as an identity. The asymmetry of AI \"choice\" vs. biological fixedness."

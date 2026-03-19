@@ -102,6 +102,7 @@ def build_prompt(event: str, tick_type: str = "admin_message") -> str:
     """Build the full turn prompt with context injection."""
     blocks_str, scratchpad_text = load_blocks()
     journal = load_journal()
+    inbox = load_inbox()
 
     # Scratchpad monitoring
     scratchpad_nudge = ""
@@ -119,19 +120,52 @@ def build_prompt(event: str, tick_type: str = "admin_message") -> str:
     else:
         current_event_section = f"Current event:\n{event}"
 
+    sections = []
+    sections.append(f"1) Last journal entries:\n{journal}")
+    
+    if inbox:
+        sections.append(f"2) Unread inbox messages:\n{inbox}")
+    
+    idx = len(sections) + 1
+    sections.append(f"{idx}) Hot memory blocks (auto-loaded):\n{blocks_str}{scratchpad_nudge}")
+    
+    idx = len(sections) + 1
+    sections.append(f"{idx}) {current_event_section}")
+
+    sections_str = "\n\n".join(sections)
+
     return f"""Context for this turn:
 
-1) Last journal entries:
-{journal}
-
-2) Hot memory blocks (auto-loaded):
-{blocks_str}
-{scratchpad_nudge}
-3) {current_event_section}
+{sections_str}
 
 Remember: Use send_message to communicate. Your final text output is discarded.
 Call journal exactly once at the end of your turn.
 """
+
+
+def load_inbox() -> str:
+    """Load unread messages from logs/inbox.jsonl."""
+    inbox_log = HOME / "logs" / "inbox.jsonl"
+    if not inbox_log.exists():
+        return ""
+
+    unread = []
+    try:
+        lines = inbox_log.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            if entry.get("read") is not True:
+                timestamp = entry.get("timestamp", "?")
+                sender = entry.get("from", "Cyrus")
+                text = entry.get("text", "")
+                unread.append(f"[{timestamp}] from {sender}: {text}")
+    except Exception:
+        return ""
+
+    return "\n".join(unread) if unread else ""
 
 
 def read_new_messages(messages_log: Path, prior_size: int) -> list[str]:
@@ -262,6 +296,7 @@ if __name__ == "__main__":
     parser.add_argument("event", nargs="?", default=None, help="The event to process")
     parser.add_argument("--harness", choices=["claude", "gemini"], default="claude", help="The AI harness to use")
     parser.add_argument("--tick-type", choices=["admin_message", "operational_check", "deep_reflection"], default="admin_message", help="The type of tick/event")
+    parser.add_argument("--dry-run", action="store_true", help="Print the prompt and exit")
     
     args = parser.parse_args()
     
@@ -274,6 +309,10 @@ if __name__ == "__main__":
             event = "" # Ignored by templates
             
     prompt = build_prompt(event, tick_type=args.tick_type)
+    
+    if args.dry_run:
+        print(prompt)
+        sys.exit(0)
     
     if args.harness == "gemini":
         invoke_gemini(prompt)

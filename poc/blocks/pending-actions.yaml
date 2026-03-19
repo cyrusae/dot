@@ -1,0 +1,11 @@
+name: pending-actions
+tier: hot
+sort_order: 80
+text: |
+  Intentions that persist across sessions. Things to do, follow up on,
+  bring up with Cyrus, research during free time, write about.
+
+  During reflection: are intentions accumulating faster than they resolve?
+  Are certain types consistently deprioritized? These patterns matter.
+
+  [current items]

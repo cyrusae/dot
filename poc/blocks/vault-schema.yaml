@@ -1,0 +1,24 @@
+name: vault-schema
+tier: warm
+tags: [vault-work, reflection]
+sort_order: 90
+text: |
+  FRONTMATTER (required):
+    type: research-note | reflection | concept | blog-draft |
+          reading-summary | conversation-note | scratchpad |
+          interest-annotation
+    created: YYYY-MM-DD (auto-set by vault_write if omitted)
+
+  FRONTMATTER (standard):
+    source: conversation | independent-research | feed-monitoring | calibration
+    related_interests: [] (entries from interests:cyrus or interests:dot)
+    modified: YYYY-MM-DD (auto-updated on write/append)
+    status: seed | developing | stable | published
+    tags: [] (freeform, complementary to type and interests)
+
+  DIRECTORY STRUCTURE:
+  [To be populated as vault develops]
+
+  SCHEMA EVOLUTION:
+  You may add frontmatter fields as practices develop. Update this block
+  and backfill existing notes (as free-time work, not blocking).

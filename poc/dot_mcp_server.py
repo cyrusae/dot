@@ -272,6 +272,20 @@ async def list_tools():
             },
         ),
         Tool(
+            name="search_messages",
+            description="Search Dot's outgoing messages (messages.jsonl) by keyword and/or date range. Use this for verbatim context of what was said in prior conversations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Text to search for (case-insensitive). Omit to return all entries in range."},
+                    "since": {"type": "string", "description": "ISO date string (YYYY-MM-DD or full ISO timestamp). Only return entries at or after this time."},
+                    "until": {"type": "string", "description": "ISO date string (YYYY-MM-DD or full ISO timestamp). Only return entries at or before this time."},
+                    "limit": {"type": "integer", "description": "Maximum number of entries to return (default 20).", "default": 20},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="search_journal",
             description="Search journal entries by keyword and/or date range. Returns matching entries in reverse chronological order.",
             inputSchema={
@@ -308,6 +322,8 @@ async def call_tool(name: str, arguments: dict):
         return await handle_unschedule_job(arguments)
     elif name == "search_journal":
         return await handle_search_journal(arguments)
+    elif name == "search_messages":
+        return await handle_search_messages(arguments)
     elif name.startswith("vault_"):
         handler_name = f"handle_{name}"
         handler = globals().get(handler_name)
@@ -977,6 +993,52 @@ async def handle_search_journal(args: dict):
             f"predictions: {entry.get('predictions', '')}"
         )
     return [TextContent(type="text", text="\n\n".join(rendered))]
+
+
+async def handle_search_messages(args: dict):
+    messages_path = LOGS_DIR / "messages.jsonl"
+    if not messages_path.exists():
+        return [TextContent(type="text", text="(no messages)")]
+
+    query = args.get("query", "").lower()
+    since = args.get("since", "")
+    until = args.get("until", "")
+    limit = int(args.get("limit", 20))
+
+    entries = []
+    for line in messages_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if since or until:
+        filtered = []
+        for entry in entries:
+            ts = entry.get("timestamp", "")
+            if since and ts < since:
+                continue
+            if until and ts > until:
+                continue
+            filtered.append(entry)
+        entries = filtered
+
+    if query:
+        entries = [e for e in entries if query in e.get("text", "").lower()]
+
+    entries = entries[-limit:][::-1]
+
+    if not entries:
+        return [TextContent(type="text", text="(no matching messages)")]
+
+    rendered = [
+        f"timestamp: {e.get('timestamp', '?')}\n{e.get('text', '')}"
+        for e in entries
+    ]
+    return [TextContent(type="text", text="\n\n---\n\n".join(rendered))]
 
 
 async def main():

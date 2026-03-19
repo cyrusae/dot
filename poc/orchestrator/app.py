@@ -116,7 +116,7 @@ async def run(config_path: Path | None = None):
     discord_token = config.get("discord", {}).get("token", "")
     if discord_token:
         discord_config = config.get("discord", {})
-        discord_bridge = DiscordBridge(discord_config, queue)
+        discord_bridge = DiscordBridge(discord_config, queue, HOME / "vault")
         # Run discord client in background task
         asyncio.create_task(discord_bridge.start(discord_token))
         print("[coordinator] Discord bridge starting...")

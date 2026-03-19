@@ -1,27 +1,45 @@
 import asyncio
 
+from pathlib import Path
+
 import discord
 
 from .models import AgentEvent
+from .phone_book import PhoneBook
 
 
 class DiscordBridge(discord.Client):
-    def __init__(self, config: dict, event_queue: asyncio.Queue):
+    def __init__(self, config: dict, event_queue: asyncio.Queue, vault_dir: Path):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.dm_messages = True
+        intents.members = True  # Needed to iterate guild members
         super().__init__(intents=intents)
         self.config = config
         self.event_queue = event_queue
+        self.vault_dir = vault_dir
+        self.phone_book = PhoneBook(vault_dir)
         self._reply_channels: dict[str, int] = {}  # correlation: channel_id
         self._last_channel_id: int | None = None
 
     async def on_ready(self):
         print(f"[discord] Logged in as {self.user}")
+        # Update from guilds
+        for guild in self.guilds:
+            self.phone_book.update_from_guild(guild)
+        # Update from all users the bot can see (captures DM-only contacts if cached)
+        for user in self.users:
+            self.phone_book.update_from_dm(user)
+        self.phone_book.render()
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
             return
+
+        # Update phone book from message authors to capture DM contacts not in any guild
+        if self.phone_book.update_from_dm(message.author):
+            self.phone_book.render()
+
         if not self._should_process(message):
             return
 

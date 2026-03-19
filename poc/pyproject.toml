@@ -7,3 +7,6 @@ dependencies = [
     "mcp",
     "pyyaml",
 ]
+
+[project.scripts]
+dot = "dot_cli:main"

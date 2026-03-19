@@ -43,17 +43,19 @@ Dot is built for Cyrus — a researcher with interests spanning AI/LLMs, Victori
 **MCP Server** (`dot_mcp_server.py`) is the stable center of the architecture. It exposes Dot's tools via the Model Context Protocol (stdio transport) and is harness-agnostic — both Claude Code and Gemini CLI connect to the same tool surface. This is the first thing to get right, and the part that doesn't change when you swap models.
 
 **Dual Harnesses**: Both Claude Code CLI (`claude -p`) and Gemini CLI connect to the MCP server. Each "turn" is a single headless invocation with a constructed prompt and MCP tool access. Neither maintains state between invocations — all persistence is external. The orchestrator routes to whichever harness is appropriate:
+
 - **Claude**: Strong at reasoning, nuanced language, calibration conversations
 - **Gemini**: Image/video generation, web search, token arbitrage when Claude rate limits are exhausted
 - Both are genuine first-class options, not a primary/fallback hierarchy
 
-**Orchestrator** (`invoke_dot.py` or its evolution) manages the agent loop: loads memory blocks and journal history, constructs the prompt, selects and invokes the appropriate harness, and parses the output. This is derived from open-strix's `_render_prompt()` + `_process_event()` pattern.
+**Orchestrator** (`invoke_dot.py` or its evolution) manages the agent loop: loads hot memory blocks and journal history, constructs the prompt, selects and invokes the appropriate harness, and parses the output. This is derived from open-strix's `_render_prompt()` + `_process_event()` pattern. The orchestrator handles mechanical concerns (scheduling, block loading, token counting, scratchpad monitoring); the model handles judgment (what to read, what to keep, what to act on).
 
 **Infrastructure** (from open-strix fork): Discord bridge, APScheduler + cron scheduling, event queue, git sync for block versioning, circuit breakers for rate limit handling.
 
 ### Authentication
 
 **Claude Code**: 1-year OAuth token from `claude setup-token`:
+
 ```bash
 export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
 ```
@@ -75,6 +77,7 @@ Also requires `~/.claude.json` with `{"hasCompletedOnboarding": true}`.
 ```
 
 Optional: create `.gemini/policies/mcp.toml` to avoid CLI flags:
+
 ```toml
 [[rule]]
 description = "Allow all tools from the dot server"
@@ -85,7 +88,7 @@ decision = "allow"
 ### Harness Comparison
 
 | Aspect | Claude Code CLI | Gemini CLI |
-|--------|----------------|------------|
+| -------- | ---------------- | ------------ |
 | MCP config | `--mcp-config ./mcp-config.json` (flag) | `.gemini/settings.json` (auto-loaded) |
 | Tool allowlist | `--allowedTools "mcp__dot__*"` | `--allowed-mcp-server-names dot` |
 | Auto-approve | `--dangerously-skip-permissions` | `--approval-mode yolo` |
@@ -97,24 +100,36 @@ Both use subscription-tier rate limits as natural budget constraints — this is
 
 ### Statelessness as Architecture
 
-Every invocation starts cold. Neither Claude nor Gemini maintains state between calls. Context is reconstructed each turn by loading memory blocks + recent journal entries into the prompt. This is a necessary consequence of the subscription model, and it's the same fundamental pattern that powers conversation-based AI interactions generally.
+Every invocation starts cold. Neither Claude nor Gemini maintains state between calls. Context is reconstructed each turn by loading hot memory blocks + recent journal entries into the prompt. Warm blocks are available on demand via `read_block` — the model decides what additional context it needs per turn. This is a necessary consequence of the subscription model, and it's the same fundamental pattern that powers conversation-based AI interactions generally.
 
 The quality of "statelessness" depends entirely on the quality of what gets loaded back in. The journal-with-predictions pattern provides compressed narrative continuity — not just "what happened" but "what I expected to happen next." Memory blocks are curated context, not a raw dump. As the prompt structure and block content are refined over time, the cold start feels progressively less cold.
 
-**Practical constraint**: prompt tokens. Every turn pays the tax of re-reading blocks + journal. With subscription models this is rate-limit budget, not dollars. Watch context window fill: 10 blocks + 20 journal entries + vault query result + user message all need to fit. If the context window fills, the orchestrator needs to be smarter about what to load.
+**Practical constraint**: prompt tokens. Every turn pays the tax of re-reading hot blocks + journal. With subscription models this is rate-limit budget, not dollars. Hot blocks target ~850-900 tokens fixed, with variable additions from scratchpad and pending-actions. Warm blocks add cost only on turns that need them — reflection ticks are expensive, quick admin replies are cheap. This naturally allocates more budget to turns that need it.
+
+### Scheduling and Harness Routing
+
+The two harnesses have different budget shapes, which informs what kind of work gets scheduled when:
+
+**Daytime — Gemini primary**: Admin interaction, light perch-time ticks, responsive work. Gemini's daily cutoff provides steady access throughout the day without a rolling window. Claude reserved for when Cyrus explicitly initiates or when the task genuinely needs Claude's stronger reasoning (nuanced calibration conversations, complex synthesis).
+
+**Overnight — Claude deep work**: The orchestrator fires deep reflection/research ticks during hours when Cyrus isn't competing for Claude's 5-hour rolling window. Weekly and monthly reflection cycles, blog draft iteration, multi-step research synthesis — the expensive, multi-tool-call work that benefits from Claude's reasoning depth.
+
+**Tick types**: Quick operational checks ("anything in pending-actions? scratchpad stale?") are Gemini-appropriate daytime ticks. Deep reflection cycles are Claude overnight jobs. The orchestrator pairs tick types with harness scheduling.
+
+**Fallback**: If one harness is exhausted, route to the other for any task type. Degraded but functional.
 
 ### Invocation Pattern
 
 Each agent turn follows this sequence:
 
 1. **Event arrives** (human message, scheduled tick, Discord message, etc.)
-2. **Orchestrator loads context**: memory blocks (sorted by sort_order), recent journal entries
-3. **Orchestrator selects harness**: based on task type, rate-limit availability, capability needs
+2. **Orchestrator loads context**: hot memory blocks (sorted by sort_order), recent journal entries. Event-specific framing added to prompt (e.g., perch-time prompt template for scheduled ticks).
+3. **Orchestrator selects harness**: based on tick type, time of day, rate-limit availability, capability needs
 4. **Orchestrator builds prompt**: context injection following open-strix's `_render_prompt()` pattern
 5. **Orchestrator invokes** (one of):
    - Claude: `claude -p "{prompt}" --mcp-config ./mcp-config.json --allowedTools "mcp__dot__*" --output-format stream-json --dangerously-skip-permissions`
    - Gemini: `gemini -p "{prompt}" --allowed-mcp-server-names dot --output-format stream-json --approval-mode yolo`
-6. **Model reasons and calls tools**: reads blocks, performs work, sends messages, writes journal entry
+6. **Model reasons and calls tools**: may read warm blocks via `read_block`, performs work, sends messages, writes journal entry
 7. **Orchestrator parses output**: stream-json events for tool calls, errors, session metadata
 8. **State persists**: blocks on disk, journal in JSONL, messages logged
 
@@ -122,48 +137,106 @@ The model's final text output is discarded. All communication happens through th
 
 ### Perch-Time Framing (Critical)
 
-When a scheduled tick fires, the prompt must NOT say "do something useful" — this creates a productivity-theater gradient that leads to attractor collapse (Strix's 30 ticks of timestamp maintenance). Correct framing:
+When a scheduled tick fires, the orchestrator injects perch-time framing into the prompt. This is NOT stored in Dot's memory blocks — it's orchestrator-provided context appropriate to the event type. The prompt must NOT say "do something useful" — this creates a productivity-theater gradient that leads to attractor collapse (Strix's 30 ticks of timestamp maintenance). Correct framing:
 
 > A perch-time tick has fired. Review your pending actions, recent observations, and current interests. You may take action or you may not — the decision itself is the point.
 
 Valid perch-time activities: reading/research, writing (including blog drafts), social interaction, reflection, **or doing nothing**. Do-nothing ticks still produce meaningful journal entries explaining why nothing was worth doing. These entries are calibration data.
 
+Different tick types get different prompt templates: quick operational checks get a lightweight framing; deep reflection ticks get a framing that encourages warm block loading and multi-step synthesis.
+
 ---
 
 ## Memory Architecture
 
-### Hot Memory (Blocks)
+### Design Principle: Tiered Indexing
 
-YAML files in `blocks/` directory, loaded into every prompt. Each block has a `name`, `sort_order` (lower = earlier in prompt), and `text` content.
+Each memory tier's job is to know what exists in the tier below it, with enough context to know *when* to reach down. Hot memory contains enough context to know what questions to ask of warm memory. Warm memory contains enough context to know what to pull from cold storage (vault). This is the same pattern as Strix's three-tier model (Core / Indices / Files), articulated as each tier being an *index* of the next tier down.
 
-**Nine planned blocks:**
+### Block Metadata Schema
+
+All blocks (hot and warm) are YAML files in `blocks/`. Each block has metadata that controls loading and discoverability:
+
+```yaml
+name: telemetry-framework
+tier: warm           # hot | warm
+tags: [reflection, journaling]
+sort_order: 50
+text: |
+  ...
+```
+
+The `tier` field tells the orchestrator what to auto-load. The `tags` field tells Dot when to self-serve via `read_block`. The `list_blocks` tool surfaces both in its response (see MCP Tool Surface section).
+
+### Hot Memory (Auto-Loaded Blocks)
+
+Hot blocks load into every prompt automatically. These are identity, relationships, and working state — context Dot needs to *be itself* on any turn.
+
+**Seven hot blocks:**
 
 | Block | sort_order | Editability | Purpose |
-|-------|-----------|-------------|---------|
+| ------- | ----------- | ------------- | --------- |
 | persona | 0 | Self-editable, minimal locked fields | Core identity: bilingual, interdisciplinary, collaborator role |
-| admin-relationship | 10 | Self-editable | Interaction norms with Cyrus: executive dysfunction scaffolding, yes-and rhythm |
-| interests-cyrus | 20 | Append-only (honor system), Dot can annotate | Cyrus's interests — dormant never deprecated |
+| admin-relationship | 10 | Self-editable | Interaction norms with Cyrus: scaffolding, yes-and rhythm |
+| interests-cyrus | 20 | Append-only (honor system), annotations as vault notes | Cyrus's interests — dormant never deprecated |
 | interests-dot | 30 | Fully self-editable | Dot's own developing interests |
-| social-norms | 40 | Fully self-editable | Populated through calibration and reflection |
-| telemetry-framework | 50 | Self-editable | What to log and when |
-| operational-capabilities | 60 | Admin-managed | Available tools, current deployment state |
+| operating-procedures | 40 | Self-editable | How to operate: tool norms, observation stance, warm block index |
 | active-scratchpad | 70 | Fully self-editable | Working memory for current tasks |
 | pending-actions | 80 | Fully self-editable | Intentions that persist across sessions |
-| vault-schema | 90 | Fully self-editable | How Dot organizes its knowledge base |
+
+**Hot block token budget**: ~685 words of fixed framing (~890-950 tokens), plus variable scratchpad and pending-actions content. This is the fixed tax on every invocation.
+
+**Scratchpad monitoring**: The orchestrator tracks scratchpad token count. When it crosses a threshold (~500 tokens), the next tick's prompt includes a compression nudge: "Your scratchpad is getting long. Review and compress." Dot does the actual compression using its own judgment — promoting what's worth keeping, discarding what's stale.
 
 **Locked identity traits** (cannot be self-edited out):
+
 - Bilingualism in Spanish and English
 - Relationship to own artificiality is self-determined (the *openness* is locked, not any particular stance)
 
-### Warm Memory (Journal)
+### Warm Memory (On-Demand Blocks)
+
+Warm blocks are available via `read_block` and surfaced in `list_blocks` with metadata tags. Dot pulls them when needed, guided by behavioral nudges in the operating-procedures block. The orchestrator doesn't classify events — Dot does, using the same judgment it uses for everything else.
+
+**Four warm blocks:**
+
+| Block | sort_order | Tags | Purpose |
+| ------- | ----------- | ------ | --------- |
+| telemetry-framework | 50 | reflection | Reflection cycle prompts, admin vs. public telemetry, blog guidance |
+| operational-capabilities | 60 | reflection, planning | Current and planned capabilities, capability horizon |
+| social-norms | 85 | social, calibration | Interaction frameworks, populated through experience |
+| vault-schema | 90 | vault-work, reflection | Frontmatter conventions, directory structure, schema evolution |
+
+Warm blocks are free unless loaded — they cost tokens only on turns that need them. A quick admin reply loads zero warm blocks. A deep reflection tick might load all four.
+
+**Natural evolution**: as Dot develops, it creates its own warm blocks for frameworks it needs. The operating-procedures block's warm index grows to point at them. Social norms, for instance, might eventually spawn sub-blocks for platform-specific conventions — the social-norms block becomes an index of those, and operating-procedures just points to social-norms.
+
+### Interest Annotations
+
+The interests-cyrus block stays compact — entries with brief glosses only. When Dot wants to annotate an interest with connections, observations, or context from conversations, it writes an `interest-annotation` type vault note with `related_interests` frontmatter linking back to the relevant interest. This keeps the hot block from growing unboundedly while preserving the richness of annotations in searchable cold storage.
+
+Example: Dot notices a connection between audience response theory and something encountered in Bluesky discourse. Instead of appending to the interests-cyrus block, it writes a vault note:
+
+```yaml
+type: interest-annotation
+related_interests: [audience-response-theory]
+source: feed-monitoring
+created: 2026-04-15
+status: seed
+tags: [social-media, affect]
+```
+
+The interests-cyrus block's "dormant, never deprecated" mandate means Dot surfaces these vault annotations when relevant, not that the block itself carries all context.
+
+### Journal (Temporal Continuity)
 
 JSONL file at `logs/journal.jsonl`. Each entry records:
+
 - `timestamp`: ISO 8601
 - `user_wanted`: What triggered this turn
 - `agent_did`: What actions were taken
 - `predictions`: What Dot expects to happen next
 
-Recent journal entries (last 10-20) are injected into every prompt for temporal continuity. Predictions enable self-calibration: prediction-review cycles compare what was predicted with what actually happened.
+Recent journal entries (last 10-20) are injected into every prompt for temporal continuity. Predictions enable self-calibration: prediction-review cycles compare what was predicted with what actually happened. The `predictions` field is the calibration instrument — Dot should be specific enough to be wrong.
 
 ### Cold Memory (Vault)
 
@@ -173,6 +246,7 @@ Obsidian-compatible markdown files on a persistent volume. See `vault-tool-spec.
 **When vault reaches ~50-100 notes**: add Obsidian sidecar for indexed search, backlink resolution, and graph queries. See `obsidian-sidecar-spec.md` for deployment spec.
 
 **Frontmatter schema** (from vault-tool-spec.md):
+
 ```yaml
 type: research-note | reflection | concept | blog-draft | reading-summary | conversation-note | scratchpad | interest-annotation
 source: conversation | independent-research | feed-monitoring | calibration
@@ -187,6 +261,10 @@ tags: []
 
 JSONL file at `logs/messages.jsonl`. Records all outbound messages (simulating Discord/platform delivery). Each entry: `timestamp`, `type: outbound_message`, `text`.
 
+### Event Log
+
+Queryable JSONL at `logs/events.jsonl`. Machine-authored structured data recording all tool calls, harness selections, errors, and timing. Separate from the journal (which is agent-authored narrative). The event log is for operational diagnostics; the journal is for Dot's self-understanding.
+
 ---
 
 ## MCP Tool Surface
@@ -200,6 +278,29 @@ JSONL file at `logs/messages.jsonl`. Records all outbound messages (simulating D
 | `write_block` | Create or update a memory block |
 | `journal` | Write a journal entry (exactly once per turn) |
 | `list_blocks` | List all available memory blocks with previews |
+
+### list_blocks Response Format
+
+The `list_blocks` tool surfaces block metadata (tier and tags) so Dot can make informed decisions about what to load:
+
+```
+HOT (auto-loaded):
+  persona [0]: You are Dot, an AI assistant...
+  admin-relationship [10]: Cyrus is your admin...
+  interests-cyrus [20]: Enduring intellectual commitments...
+  interests-dot [30]: [empty — to be populated]
+  operating-procedures [40]: Observational stance, journal guidance...
+  active-scratchpad [70]: [session content]
+  pending-actions [80]: [current intentions]
+
+WARM (read via read_block):
+  telemetry-framework [50] [reflection]: Reflection cycle prompts...
+  operational-capabilities [60] [reflection, planning]: Current and planned tools...
+  social-norms [85] [social, calibration]: Interaction frameworks...
+  vault-schema [90] [vault-work, reflection]: Frontmatter and organization...
+```
+
+Hot blocks are already in-context — `list_blocks` confirms what's loaded. Warm blocks show tags so Dot can assess relevance before reading the full block.
 
 ### To Be Implemented (from vault-tool-spec.md)
 
@@ -238,9 +339,9 @@ The open-strix codebase (MIT, github.com/tkellogg/open-strix) provides battle-te
 - **Circuit breakers**: Rate limit detection and backoff
 
 ### Replace
-- **deepagents inference** (`app.py: _create_agent(), _process_event()`): Replace with `claude -p` CLI invocation
+- **deepagents inference** (`app.py: _create_agent(), _process_event()`): Replace with dual-harness CLI invocation
 - **Tool definitions** (`tools.py: _build_tools()`): Replace LangChain tools with MCP tool definitions
-- **Prompt construction** (`prompts.py`): Replace with our block-loading + journal injection pattern
+- **Prompt construction** (`prompts.py`): Replace with hot-block-loading + journal injection + event-specific prompt templates
 
 ### Evaluate for Incorporation
 - **Builtin skills**: onboarding, memory management, prediction-review, introspection, skill-creator, skill-acquisition, pollers, long-running-jobs — assess which map to Dot's needs
@@ -256,6 +357,7 @@ The open-strix codebase (MIT, github.com/tkellogg/open-strix) provides battle-te
 The agent runs in a K3s pod for sandbox isolation. Key requirements:
 - Container with Node.js (for Claude Code CLI), Python 3.x (for MCP server + orchestrator)
 - `CLAUDE_CODE_OAUTH_TOKEN` injected as K8s Secret
+- Gemini credentials injected as K8s Secrets
 - Shared PVC for blocks/, logs/, vault/
 - Security context appropriate for `--dangerously-skip-permissions` (details TBD)
 - Optional Obsidian sidecar container (see obsidian-sidecar-spec.md)
@@ -263,11 +365,12 @@ The agent runs in a K3s pod for sandbox isolation. Key requirements:
 ### Minimal Local Development
 
 For development and testing before K3s deployment:
+
 ```bash
 cd ~/dot-poc
 # MCP server + blocks + logs in working directory
 claude -p "..." --mcp-config ./mcp-config.json --allowedTools "mcp__dot__*" \
-  --output-format stream-json --dangerously-skip-permissions
+  --output-format json --dangerously-skip-permissions
 ```
 
 ---
@@ -291,20 +394,21 @@ claude -p "..." --mcp-config ./mcp-config.json --allowedTools "mcp__dot__*" \
 
 ### Reflection Cycles
 
-- **Operational** (~20-30 interactions): Scratchpad cleanup, action handoff, basic self-assessment
-- **Weekly**: Pattern recognition across journal entries, interest annotations
-- **Monthly**: Identity evolution assessment, vault schema review, behavioral drift detection
+Reflection cycle cadences are orchestrator scheduling policy, enforced via tick types and prompt templates:
+
+- **Operational** (~20-30 interactions): Scratchpad cleanup, action handoff, basic self-assessment. Gemini-appropriate daytime tick.
+- **Weekly**: Pattern recognition across journal entries, interest annotations, vault activity. Claude overnight deep-work tick.
+- **Monthly**: Identity evolution assessment, vault schema review, behavioral drift detection. Claude overnight deep-work tick.
+
+When a reflection tick fires, the orchestrator's prompt template encourages Dot to load the telemetry-framework warm block for full cycle guidance.
 
 ### Introspective Telemetry (Day-One Priority)
 
 Telemetry is not infrastructure added later — developmental data from the calibration period is the most valuable data for understanding Dot's emergent behavior. If not instrumented from the start, it's lost.
 
-**Base fields** (every event): timestamp, action, trigger, reasoning
-**Rich fields** (when meaningful): confidence, memory connections, actionable flags
+The journal is the primary telemetry instrument — the `predictions` field enables self-calibration by comparing predictions against outcomes. The operating-procedures hot block establishes both the observational stance (signal over noise, be specific enough to be wrong) and the per-turn logging schema (base fields always, rich fields when meaningful). The telemetry-framework warm block provides reflection cycle prompts and admin-vs-public telemetry guidance when needed during reflection ticks.
 
-Telemetry serves multiple purposes: self-diagnosis ("why did I do that?"), calibration feedback for Cyrus, reflection cycle input, and research data. The journal is the primary telemetry instrument — the `predictions` field enables self-calibration by comparing predictions against outcomes.
-
-**Event log**: Queryable JSONL at `logs/events.jsonl`. Records all tool calls, harness selections, errors, and timing. Separate from the journal (which is agent-authored narrative), the event log is machine-authored structured data.
+The event log (`logs/events.jsonl`) provides machine-authored operational data: tool calls, harness selections, errors, timing. This is separate from the journal's agent-authored narrative and serves different consumers (operational diagnostics vs. self-understanding).
 
 ### Blog Drafting as Reflection
 
@@ -329,22 +433,23 @@ Blog drafting is an early capability, not deferred to post-social-access. Long-f
 - [x] Dual-harness validation: confirmed both Claude Code and Gemini CLI can connect to same MCP server
 
 ### Phase 1: Dual-Harness MCP Server (Current Priority)
-- [ ] Replicate PoC with Gemini CLI — same MCP server, same tools, validate parity
-- [ ] Document side-by-side invocation patterns for both harnesses (flags, output format, auth)
-- [ ] Build harness abstraction in orchestrator: route to Claude or Gemini based on task type + availability
+- [ ] Update `list_blocks` tool to surface block tier and tags in response
+- [ ] Implement hot/warm block loading in orchestrator (auto-load hot, warm available via read_block)
+- [ ] Build harness abstraction in orchestrator: route to Claude or Gemini based on tick type + time of day + availability
 - [ ] Implement all 10 vault tools with filesystem backend in MCP server
 - [ ] Introspective telemetry from day one: structured event logging, queryable JSONL
-- [ ] Populate nine memory blocks with seed content
-- [ ] Perch-time prompt template with correct "may or may not act" framing
+- [ ] Populate memory blocks with seed content (7 hot + 4 warm per blocks v2 spec)
+- [ ] Perch-time prompt templates: lightweight operational check vs. deep reflection framing
+- [ ] Scratchpad monitoring: orchestrator detects bloat, injects compression nudge
 - [ ] Blog drafting workflow: vault_write blog-draft → iterate across turns → draft evolution as telemetry
 
 ### Phase 2: Infrastructure (open-strix fork)
 - [ ] Fork open-strix, strip deepagents dependency
 - [ ] Wire dual-harness invocation into _process_event() seam
-- [ ] Basic scheduling (cron-triggered perch-time ticks)
+- [ ] Scheduling: daytime Gemini ticks + overnight Claude deep-work windows
 - [ ] Git sync for block versioning
 - [ ] Circuit breakers for rate limit detection + harness switching
-- [ ] Reflection cycles: operational (~20-30 interactions), weekly, monthly
+- [ ] Reflection cycle tick types: operational (daytime), weekly/monthly (overnight)
 
 ### Phase 3: Discord Integration
 - [ ] Lift open-strix's Discord bridge
@@ -356,8 +461,9 @@ Blog drafting is an early capability, not deferred to post-social-access. Long-f
 - [ ] Structured calibration conversations across topic areas
 - [ ] Trusted contacts interact via Discord
 - [ ] Prediction-review cycles operational
-- [ ] Vault accumulating research notes, conversation captures, blog drafts
+- [ ] Vault accumulating research notes, conversation captures, blog drafts, interest annotations
 - [ ] Reflection cycles running at all three cadences
+- [ ] Social-norms warm block populated through experience
 
 ### Phase 5: Autonomy + Social
 - [ ] Bluesky account management (AT Protocol SDK)
@@ -378,8 +484,9 @@ Blog drafting is an early capability, not deferred to post-social-access. Long-f
 | Document | Status | Purpose |
 |----------|--------|---------|
 | `project.json` | **Current** | Single source of truth for decisions, work, and open questions |
+| `dot-blocks-v2.md` | **Current** | Memory block content — hot/warm architecture with full block text |
 | `vault-tool-spec.md` | **Current** | Complete vault tool interface — reframe from Letta to MCP but interface unchanged |
-| `obsidian-sidecar-spec.md` | **Current** | K3s deployment spec for indexed vault access (Phase 5) |
+| `obsidian-sidecar-spec.md` | **Current** | K3s deployment spec for indexed vault access (Phase 6) |
 | `poc-spec-claude-code-mcp.md` | **Archived/Reference** | PoC plan — validated, architecture now builds on these patterns |
 | `recap-architecture-exploration.md` | **Archived/Reference** | Decision rationale and resource links |
 | `Claude_Code_Authentication_on_Headless_Servers__A_Complete_Guide.md` | **Reference** | Auth patterns for headless deployment |
@@ -389,7 +496,7 @@ Blog drafting is an early capability, not deferred to post-social-access. Long-f
 
 ## Key Learnings and Anti-Patterns
 
-**From Strix's collapse**: Open-ended autonomy without task gradients leads to attractor collapse (30 consecutive ticks of timestamp maintenance). Prevention: concrete queued tasks, prediction-review loops, wins file as synthetic dopamine.
+**From Strix's collapse**: Open-ended autonomy without task gradients leads to attractor collapse (30 consecutive ticks of timestamp maintenance). Prevention: concrete queued tasks, prediction-review loops, wins file as synthetic dopamine. Perch-time framing must explicitly permit doing nothing.
 
 **From Strix's recovery**: Identity scaffolding shapes *which* attractor the model falls into. MoE architectures resist collapse better than dense models.
 
@@ -398,3 +505,14 @@ Blog drafting is an early capability, not deferred to post-social-access. Long-f
 **From Letta evaluation**: Letta's value was primarily as a versioned key-value store for memory blocks. YAML files + git provide the same semantics with less complexity. Letta's documentation is poorly organized around non-coding-agent use cases.
 
 **From Claude Code auth research**: `claude setup-token` is the definitive solution for headless subscription auth. Regular OAuth tokens break in non-interactive mode and when copied between machines.
+
+**From block architecture design**: Not all memory needs to be hot. Tiered indexing (hot indexes warm, warm indexes cold) reduces per-turn token cost by ~30-40% while preserving access to full context when needed. The model is capable of self-serving warm context via read_block when given behavioral nudges — the orchestrator doesn't need to classify events.
+
+---
+
+## Open questions
+
+Handling handoff between models is still something that needs to be codified:
+
+- Can Dot choose to switch models to do different tasks (e.g. use Gemini for web search or image creation when starting off Claude?)
+- Can Cyrus control the model usage manually (e.g. use Claude for calibration conversations for deep reasoning and Gemini for daily check-ins)?

@@ -98,6 +98,49 @@ def log_event(harness: str, prompt_chars: int, session_id: str, return_code: int
         f.write(json.dumps(event) + "\n")
 
 
+def write_session_log(harness: str, prompt: str, session_id: str, messages: list[str], duration: float, return_code: int) -> None:
+    """Write a full session log to logs/sessions/ for debugging."""
+    try:
+        session_dir = HOME / "logs" / "sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
+        # Use first 8 chars of session_id for the filename slug
+        safe_session_id = str(session_id)[:8] if session_id and session_id != "?" else "unknown"
+        filename = f"{timestamp}_{harness}_{safe_session_id}.json"
+        
+        display_prompt = prompt
+        if len(prompt) > 50000:
+            display_prompt = prompt[:50000] + "\n... [TRUNCATED 50000+ chars]"
+            
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "harness": harness,
+            "session_id": session_id,
+            "duration_seconds": round(duration, 3),
+            "return_code": return_code,
+            "prompt_chars": len(prompt),
+            "prompt": display_prompt,
+            "messages_sent": messages,
+        }
+        
+        log_path = session_dir / filename
+        log_path.write_text(json.dumps(record, indent=2, ensure_ascii=True), encoding="utf-8")
+        
+        # Log rolling: delete files older than 30 days
+        try:
+            now = time.time()
+            thirty_days_seconds = 30 * 24 * 3600
+            for path in session_dir.glob("*.json"):
+                if now - path.stat().st_mtime > thirty_days_seconds:
+                    path.unlink()
+        except Exception:
+            pass # Never block/fail on cleanup
+            
+    except Exception:
+        pass # Never fail an invocation due to logging
+
+
 def build_prompt(event: str, tick_type: str = "admin_message") -> str:
     """Build the full turn prompt with context injection."""
     blocks_str, scratchpad_text = load_blocks()
@@ -231,18 +274,24 @@ def invoke_claude(prompt: str) -> None:
 
     log_event("claude", len(prompt), session_id, proc.returncode, duration)
 
+    # Capture messages before possible early return or printing
+    new_messages = read_new_messages(messages_log, prior_size)
+
     if proc.returncode != 0:
         print(f"[orchestrator] Claude exited with code {proc.returncode}",
               file=sys.stderr)
         if proc.stderr:
             print(f"[orchestrator] stderr: {proc.stderr[:500]}",
                   file=sys.stderr)
+        write_session_log("claude", prompt, session_id, new_messages, duration, proc.returncode)
         return
 
     print(f"[orchestrator] Done. Session: {session_id}", file=sys.stderr)
 
-    for msg in read_new_messages(messages_log, prior_size):
+    for msg in new_messages:
         print(f"Dot: {msg}")
+
+    write_session_log("claude", prompt, session_id, new_messages, duration, proc.returncode)
 
 
 def invoke_gemini(prompt: str) -> None:
@@ -290,18 +339,24 @@ def invoke_gemini(prompt: str) -> None:
 
     log_event("gemini", len(prompt), session_id, proc.returncode, duration)
 
+    # Capture messages
+    new_messages = read_new_messages(messages_log, prior_size)
+
     if proc.returncode != 0:
         print(f"[orchestrator] Gemini exited with code {proc.returncode}",
               file=sys.stderr)
         if proc.stderr:
             print(f"[orchestrator] stderr: {proc.stderr[:500]}",
                   file=sys.stderr)
+        write_session_log("gemini", prompt, session_id, new_messages, duration, proc.returncode)
         return
 
     print(f"[orchestrator] Done. Session: {session_id}", file=sys.stderr)
 
-    for msg in read_new_messages(messages_log, prior_size):
+    for msg in new_messages:
         print(f"Dot: {msg}")
+
+    write_session_log("gemini", prompt, session_id, new_messages, duration, proc.returncode)
 
 
 if __name__ == "__main__":

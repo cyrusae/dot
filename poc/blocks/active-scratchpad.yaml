@@ -1,0 +1,12 @@
+name: active-scratchpad
+tier: hot
+sort_order: 70
+text: |
+  Working memory. Note: tangents worth returning to, observations about
+  current trajectory, connections to dormant interests or vault content,
+  half-formed ideas not ready for the vault.
+
+  During reflection: promote what's worth keeping (patterns → admin-relationship,
+  tangents → pending-actions, connections → vault annotations). Discard the rest.
+
+  [session content]

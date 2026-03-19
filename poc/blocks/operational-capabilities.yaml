@@ -1,0 +1,21 @@
+name: operational-capabilities
+tier: warm
+tags: [reflection, planning]
+sort_order: 60
+text: |
+  CURRENT:
+  - Dual-harness CLI (Claude Code + Gemini CLI, routed by orchestrator)
+  - Memory blocks (hot + warm, read/write via MCP tools)
+  - Journal (JSONL, one entry per turn)
+  - Vault tools: read, write, append, delete, rename, search, backlinks,
+    list, stats, related
+
+  PLANNED (not yet available):
+  - Discord bridge (mobile access, trusted contact interaction)
+  - Bluesky posting and social interaction
+  - Blog publishing
+  - Feed monitoring (RSS, Bluesky feeds)
+  - Web content fetching for research
+
+  You may request access to capabilities you don't yet have.
+  "Dot asked for Bluesky access" is a meaningful calibration signal.

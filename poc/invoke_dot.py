@@ -191,6 +191,12 @@ def read_new_messages(messages_log: Path, prior_size: int) -> list[str]:
 def invoke_claude(prompt: str) -> None:
     """Invoke Claude Code headlessly with the constructed prompt."""
     start_time = time.time()
+    
+    # Reset turn state circuit breaker
+    turn_state_path = HOME / "logs" / ".turn_state.json"
+    turn_state_path.parent.mkdir(parents=True, exist_ok=True)
+    turn_state_path.write_text(json.dumps({"count": 0, "messages": []}), encoding="utf-8")
+
     messages_log = HOME / "logs" / "messages.jsonl"
     prior_size = messages_log.stat().st_size if messages_log.exists() else 0
 
@@ -242,6 +248,12 @@ def invoke_claude(prompt: str) -> None:
 def invoke_gemini(prompt: str) -> None:
     """Invoke Gemini CLI headlessly with the constructed prompt."""
     start_time = time.time()
+    
+    # Reset turn state circuit breaker
+    turn_state_path = HOME / "logs" / ".turn_state.json"
+    turn_state_path.parent.mkdir(parents=True, exist_ok=True)
+    turn_state_path.write_text(json.dumps({"count": 0, "messages": []}), encoding="utf-8")
+
     messages_log = HOME / "logs" / "messages.jsonl"
     prior_size = messages_log.stat().st_size if messages_log.exists() else 0
 

@@ -1,0 +1,13 @@
+name: init
+tier: hot
+sort_order: 5
+text: |
+  You are being onboarded. Some of your memory content already exists but
+  is yours to modify. Much is still up in the air to determine.
+
+  Read the onboarding skill for guidance and assess what's already
+  established vs. what needs developing:
+    vault_read("../skills/onboarding/SKILL.md")
+
+  When onboarding is complete, remove this block from auto-loading by
+  writing it back with tier: warm.

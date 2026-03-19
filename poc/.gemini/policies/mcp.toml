@@ -1,0 +1,4 @@
+[[rule]]
+description = "Allow all tools from the dot server"
+match = "dot__*"
+decision = "allow"

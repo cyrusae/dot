@@ -1,0 +1,25 @@
+# Dot's schedule — Dot can modify this file to self-schedule
+# tick_type options: admin_message | operational_check | deep_reflection
+# harness options: claude | gemini (omit to use system default)
+
+jobs:
+  - name: morning-check
+    trigger: cron
+    cron: "0 9 * * *"
+    tick_type: operational_check
+    prompt: ""
+    harness: gemini
+
+  - name: afternoon-check
+    trigger: cron
+    cron: "0 14 * * *"
+    tick_type: operational_check
+    prompt: ""
+    harness: gemini
+
+  - name: weekly-reflection
+    trigger: cron
+    cron: "0 10 * * 1"
+    tick_type: deep_reflection
+    prompt: ""
+    harness: claude

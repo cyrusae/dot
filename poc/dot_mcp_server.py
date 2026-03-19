@@ -18,8 +18,39 @@ HOME_DIR = Path(os.environ.get("DOT_HOME", ".")).resolve()
 BLOCKS_DIR = HOME_DIR / "blocks"
 LOGS_DIR = HOME_DIR / "logs"
 VAULT_DIR = HOME_DIR / "vault"
+TURN_STATE_PATH = LOGS_DIR / ".turn_state.json"
 
 server = Server("dot-tools")
+
+
+def _read_turn_state():
+    if not TURN_STATE_PATH.exists():
+        return {"count": 0, "messages": []}
+    try:
+        return json.loads(TURN_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {"count": 0, "messages": []}
+
+
+def _write_turn_state(state):
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    TURN_STATE_PATH.write_text(json.dumps(state), encoding="utf-8")
+
+
+def _jaccard_similarity(s1: str, s2: str) -> float:
+    set1 = set(s1.lower().split())
+    set2 = set(s2.lower().split())
+    if not set1 and not set2:
+        return 1.0
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+
+def reset_turn_state():
+    _write_turn_state({"count": 0, "messages": []})
 
 
 @server.list_tools()
@@ -299,6 +330,11 @@ async def list_tools():
                 "required": [],
             },
         ),
+        Tool(
+            name="reset_turn_state",
+            description="Reset the turn state (message count and similarity tracking). Called by orchestrator at start of turn.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ]
 
 
@@ -324,6 +360,9 @@ async def call_tool(name: str, arguments: dict):
         return await handle_search_journal(arguments)
     elif name == "search_messages":
         return await handle_search_messages(arguments)
+    elif name == "reset_turn_state":
+        reset_turn_state()
+        return [TextContent(type="text", text="Turn state reset.")]
     elif name.startswith("vault_"):
         handler_name = f"handle_{name}"
         handler = globals().get(handler_name)
@@ -339,6 +378,26 @@ async def handle_send_message(args: dict):
     text = args.get("text", "").strip()
     if not text:
         return [TextContent(type="text", text="Error: message text is empty")]
+
+    state = _read_turn_state()
+    count = state.get("count", 0)
+    messages = state.get("messages", [])
+
+    # Hard limit
+    if count >= 10:
+        return [TextContent(type="text", text="Circuit breaker: send_message limit (10) reached this turn. Stop and journal.")]
+
+    # Soft similarity check
+    if len(messages) >= 2:
+        sim1 = _jaccard_similarity(text, messages[-1])
+        sim2 = _jaccard_similarity(text, messages[-2])
+        if sim1 > 0.95 and sim2 > 0.95:
+            return [TextContent(type="text", text="Circuit breaker: messages too similar (possible loop). Stop and journal.")]
+
+    # Update state
+    state["count"] = count + 1
+    state["messages"] = messages + [text]
+    _write_turn_state(state)
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOGS_DIR / "messages.jsonl"

@@ -1,0 +1,9 @@
+name: routing-state
+tier: warm
+tags: [routing]
+sort_order: 45
+text: |
+  preferred_harness: null
+  reason: ""
+  set_at: ""
+  expires_after_turns: null

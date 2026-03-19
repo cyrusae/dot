@@ -39,7 +39,16 @@ def _read_routing_state() -> str | None:
     try:
         import yaml
         data = yaml.safe_load(routing_block.read_text(encoding="utf-8"))
-        return data.get("text", {}).get("preferred_harness") if isinstance(data.get("text"), dict) else None
+        text_field = data.get("text", "")
+        if not text_field:
+            return None
+        
+        parsed = yaml.safe_load(text_field)
+        if not parsed:
+            return None
+            
+        harness = parsed.get("preferred_harness")
+        return harness if harness else None
     except Exception:
         return None
 

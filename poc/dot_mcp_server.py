@@ -237,6 +237,40 @@ async def list_tools():
                 },
             },
         ),
+        Tool(
+            name="schedule_job",
+            description="Schedule a recurring job by writing to scheduler.yaml. Replaces existing job with the same name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Unique name for the job"},
+                    "trigger": {"type": "string", "enum": ["interval", "cron"], "description": "Trigger type"},
+                    "tick_type": {
+                        "type": "string",
+                        "enum": ["admin_message", "operational_check", "deep_reflection"],
+                        "description": "Type of tick to emit"
+                    },
+                    "prompt": {"type": "string", "description": "Optional prompt text to include in the event", "default": ""},
+                    "harness": {"type": "string", "description": "Optional harness override (claude|gemini)", "default": None},
+                    "hours": {"type": "integer", "description": "Interval hours", "default": 0},
+                    "minutes": {"type": "integer", "description": "Interval minutes", "default": 0},
+                    "seconds": {"type": "integer", "description": "Interval seconds", "default": 0},
+                    "cron": {"type": "string", "description": "Cron expression (min hour day month dow)", "default": ""},
+                },
+                "required": ["name", "trigger", "tick_type"],
+            },
+        ),
+        Tool(
+            name="unschedule_job",
+            description="Remove a scheduled job by name from scheduler.yaml.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name of the job to remove"},
+                },
+                "required": ["name"],
+            },
+        ),
     ]
 
 
@@ -254,6 +288,10 @@ async def call_tool(name: str, arguments: dict):
         return await handle_list_blocks(arguments)
     elif name == "read_inbox":
         return await handle_read_inbox(arguments)
+    elif name == "schedule_job":
+        return await handle_schedule_job(arguments)
+    elif name == "unschedule_job":
+        return await handle_unschedule_job(arguments)
     elif name.startswith("vault_"):
         handler_name = f"handle_{name}"
         handler = globals().get(handler_name)
@@ -774,6 +812,99 @@ async def handle_read_inbox(args: dict):
             result_text += f"\n\n(Note: Failed to mark as read: {e})"
 
     return [TextContent(type="text", text=result_text)]
+
+
+async def handle_schedule_job(args: dict):
+    import yaml
+    name = args.get("name")
+    trigger = args.get("trigger")
+    tick_type = args.get("tick_type")
+    prompt = args.get("prompt", "")
+    harness = args.get("harness")
+    hours = args.get("hours", 0)
+    minutes = args.get("minutes", 0)
+    seconds = args.get("seconds", 0)
+    cron = args.get("cron", "")
+
+    if not name or not trigger or not tick_type:
+        return [TextContent(type="text", text="Error: name, trigger, and tick_type are required")]
+
+    scheduler_path = HOME_DIR / "scheduler.yaml"
+    if scheduler_path.exists():
+        try:
+            data = yaml.safe_load(scheduler_path.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error reading scheduler.yaml: {e}")]
+    else:
+        data = {"jobs": []}
+
+    if "jobs" not in data or not isinstance(data["jobs"], list):
+        data["jobs"] = []
+
+    new_job = {
+        "name": name,
+        "trigger": trigger,
+        "tick_type": tick_type,
+        "prompt": prompt,
+    }
+    if harness:
+        new_job["harness"] = harness
+    if trigger == "interval":
+        new_job["hours"] = hours
+        new_job["minutes"] = minutes
+        new_job["seconds"] = seconds
+    elif trigger == "cron":
+        new_job["cron"] = cron
+
+    # Replace existing job or append
+    updated = False
+    for i, job in enumerate(data["jobs"]):
+        if job.get("name") == name:
+            data["jobs"][i] = new_job
+            updated = True
+            break
+    
+    if not updated:
+        data["jobs"].append(new_job)
+
+    try:
+        scheduler_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error writing scheduler.yaml: {e}")]
+
+    return [TextContent(type="text", text=f"Job '{name}' scheduled successfully.")]
+
+
+async def handle_unschedule_job(args: dict):
+    import yaml
+    name = args.get("name")
+    if not name:
+        return [TextContent(type="text", text="Error: name is required")]
+
+    scheduler_path = HOME_DIR / "scheduler.yaml"
+    if not scheduler_path.exists():
+        return [TextContent(type="text", text="Error: scheduler.yaml not found")]
+
+    try:
+        data = yaml.safe_load(scheduler_path.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error reading scheduler.yaml: {e}")]
+
+    if "jobs" not in data or not isinstance(data["jobs"], list):
+        return [TextContent(type="text", text=f"Job '{name}' not found")]
+
+    original_count = len(data["jobs"])
+    data["jobs"] = [job for job in data["jobs"] if job.get("name") != name]
+
+    if len(data["jobs"]) == original_count:
+        return [TextContent(type="text", text=f"Job '{name}' not found")]
+
+    try:
+        scheduler_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error writing scheduler.yaml: {e}")]
+
+    return [TextContent(type="text", text=f"Job '{name}' unscheduled successfully.")]
 
 
 async def main():

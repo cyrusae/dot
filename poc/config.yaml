@@ -1,0 +1,19 @@
+# Dot runtime configuration
+
+discord:
+  token: "${DISCORD_TOKEN}"
+  allowed_sources:
+    dms:
+      enabled: true
+      user_ids: []       # empty = accept DMs from anyone
+    group_dms:
+      enabled: false
+    server_channels: []  # list of channel IDs to monitor
+
+harness:
+  default: claude        # claude | gemini
+  # routing-state block (written by Dot) can override per-turn
+
+scheduler:
+  yaml_path: scheduler.yaml   # relative to poc/ directory
+  enabled: true

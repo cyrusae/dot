@@ -11,3 +11,4 @@ dependencies = [
 
 [project.scripts]
 dot = "dot_cli:main"
+dot-coordinator = "orchestrator.app:main"

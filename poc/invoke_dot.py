@@ -140,6 +140,7 @@ def build_prompt(event: str, tick_type: str = "admin_message") -> str:
 
 Remember: Use send_message to communicate. Your final text output is discarded.
 Call journal exactly once at the end of your turn.
+You can read/write the 'routing-state' warm block to express a preferred harness for future turns.
 """
 
 

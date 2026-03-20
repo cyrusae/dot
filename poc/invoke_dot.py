@@ -17,6 +17,7 @@ HOME = Path(__file__).parent
 BLOCKS_DIR = HOME / "blocks"
 JOURNAL_LOG = HOME / "logs" / "journal.jsonl"
 EVENT_LOG = HOME / "logs" / "events.jsonl"
+MESSAGES_LOG = HOME / "logs" / "messages.jsonl"
 MCP_CONFIG = HOME / "mcp-config.json"
 SERVER_SCRIPT = HOME / "dot_mcp_server.py"
 
@@ -141,7 +142,114 @@ def write_session_log(harness: str, prompt: str, session_id: str, messages: list
         pass # Never fail an invocation due to logging
 
 
-def build_prompt(event: str, tick_type: str = "admin_message") -> str:
+def load_conversation_history(conversation_id: str, count: int = 10) -> str:
+    """Load the last N messages for a given conversation_id from messages.jsonl."""
+    if not MESSAGES_LOG.exists():
+        return "(no history)"
+
+    matches = []
+    try:
+        lines = MESSAGES_LOG.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            cid = entry.get("conversation_id", "cli")
+            if cid == conversation_id:
+                timestamp = entry.get("timestamp", "?")
+                text = entry.get("text", "")
+                matches.append(f"[{timestamp}] {text}")
+    except Exception:
+        return "(error loading history)"
+
+    recent = matches[-count:]
+    return "\n".join(recent) if recent else "(no history)"
+
+
+def load_person_context(author_id: str | None, participant_ids: list[str] | None = None) -> str:
+    """Load context for people in the conversation from vault/people/*.md."""
+    people_dir = HOME / "vault" / "people"
+    if not people_dir.exists():
+        return ""
+
+    ids_to_find = set()
+    if author_id:
+        ids_to_find.add(author_id)
+    if participant_ids:
+        ids_to_find.update(participant_ids)
+
+    if not ids_to_find:
+        return ""
+
+    found_contexts = []
+    found_ids = set()
+
+    for path in sorted(people_dir.glob("*.md")):
+        try:
+            content = path.read_text(encoding="utf-8")
+            if not content.startswith("---"):
+                continue
+            
+            end_fm = content.find("---", 3)
+            if end_fm == -1:
+                continue
+                
+            fm_text = content[3:end_fm]
+            body = content[end_fm+3:].strip()
+            
+            fm = yaml.safe_load(fm_text)
+            if not fm or "platforms" not in fm:
+                continue
+                
+            platforms = fm["platforms"]
+            # platforms is likely a dict: {"discord": "123", "bluesky": "did:..."}
+            # The input IDs are "platform:id"
+            
+            match = False
+            for pid in ids_to_find:
+                if ":" not in pid:
+                    continue
+                platform, uid = pid.split(":", 1)
+                # Ensure we match string to string or whatever types they are
+                if str(platforms.get(platform)) == str(uid):
+                    match = True
+                    found_ids.add(pid)
+            
+            if match:
+                name = fm.get("name", path.stem)
+                found_contexts.append(f"Person: {name}\nFile: {path.name}\n{body}")
+
+        except Exception:
+            continue
+
+    output = "\n\n".join(found_contexts)
+    
+    # Nudge for unknowns
+    unknowns = ids_to_find - found_ids
+    if unknowns:
+        nudge_lines = []
+        for uid in sorted(unknowns):
+            # Simple slug: discord:123 -> discord_123
+            slug = uid.replace(":", "_")
+            nudge_lines.append(f"No person note found for {uid}. Consider creating one at vault/people/{slug}.md.")
+        
+        if output:
+            output += "\n\n" + "\n".join(nudge_lines)
+        else:
+            output = "\n".join(nudge_lines)
+            
+    return output
+
+
+def build_prompt(
+    event: str, 
+    tick_type: str = "admin_message",
+    conversation_id: str | None = None,
+    author: str | None = None,
+    author_id: str | None = None,
+    participant_ids: list[str] | None = None
+) -> str:
     """Build the full turn prompt with context injection."""
     blocks_str, scratchpad_text = load_blocks()
     journal = load_journal()
@@ -169,6 +277,13 @@ def build_prompt(event: str, tick_type: str = "admin_message") -> str:
     if inbox:
         sections.append(f"2) Unread inbox messages:\n{inbox}")
     
+    # Conversation context
+    if conversation_id and not (conversation_id == "cli" or conversation_id.startswith("scheduler:")):
+        history = load_conversation_history(conversation_id)
+        people = load_person_context(author_id, participant_ids)
+        idx = len(sections) + 1
+        sections.append(f"{idx}) Conversation context ({conversation_id}):\n{history}\n\nPeople in this conversation:\n{people}")
+
     idx = len(sections) + 1
     sections.append(f"{idx}) Hot memory blocks (auto-loaded):\n{blocks_str}{scratchpad_nudge}")
     
@@ -238,7 +353,16 @@ def invoke_claude(prompt: str) -> None:
     # Reset turn state circuit breaker
     turn_state_path = HOME / "logs" / ".turn_state.json"
     turn_state_path.parent.mkdir(parents=True, exist_ok=True)
-    turn_state_path.write_text(json.dumps({"count": 0, "messages": []}), encoding="utf-8")
+    
+    current_state = {}
+    if turn_state_path.exists():
+        try:
+            current_state = json.loads(turn_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    
+    current_state.update({"count": 0, "messages": []})
+    turn_state_path.write_text(json.dumps(current_state), encoding="utf-8")
 
     messages_log = HOME / "logs" / "messages.jsonl"
     prior_size = messages_log.stat().st_size if messages_log.exists() else 0
@@ -301,7 +425,16 @@ def invoke_gemini(prompt: str) -> None:
     # Reset turn state circuit breaker
     turn_state_path = HOME / "logs" / ".turn_state.json"
     turn_state_path.parent.mkdir(parents=True, exist_ok=True)
-    turn_state_path.write_text(json.dumps({"count": 0, "messages": []}), encoding="utf-8")
+    
+    current_state = {}
+    if turn_state_path.exists():
+        try:
+            current_state = json.loads(turn_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    
+    current_state.update({"count": 0, "messages": []})
+    turn_state_path.write_text(json.dumps(current_state), encoding="utf-8")
 
     messages_log = HOME / "logs" / "messages.jsonl"
     prior_size = messages_log.stat().st_size if messages_log.exists() else 0

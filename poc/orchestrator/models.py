@@ -15,3 +15,5 @@ class AgentEvent:
     tick_type: str = "admin_message"  # admin_message | operational_check | deep_reflection
     harness: Optional[str] = None     # override harness for this event (None = use default)
     source_platform: str = "discord"
+    conversation_id: Optional[str] = None
+    participant_ids: list[str] = field(default_factory=list)

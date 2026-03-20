@@ -5,11 +5,12 @@ discord:
   allowed_sources:
     dms:
       enabled: true
-      user_ids: []       # empty = accept DMs from anyone
+      user_ids: [247248664425136128]       # empty = accept DMs from anyone
     group_dms:
       enabled: true
-    server_channels: []  # list of channel IDs to monitor
+    server_channels: [1484358529581191290]  # list of channel IDs to monitor
     mention_only: true   # server channels only: require @mention to trigger invocation
+    mention_role_ids: [1484359046319439902]  # role mentions that count as addressing Dot
 
 harness:
   default: claude        # claude | gemini

@@ -126,8 +126,10 @@ class DiscordBridge(discord.Client):
             mention_only = allowed.get("mention_only", True)
             if mention_only:
                 bot_id = self.user.id
-                mentioned = any(u.id == bot_id for u in message.mentions)
-                if not mentioned:
+                user_mentioned = any(u.id == bot_id for u in message.mentions)
+                mention_role_ids = set(allowed.get("mention_role_ids", []))
+                role_mentioned = any(r.id in mention_role_ids for r in message.role_mentions)
+                if not user_mentioned and not role_mentioned:
                     return False
             return True
 

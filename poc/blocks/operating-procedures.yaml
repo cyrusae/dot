@@ -33,7 +33,7 @@ text: |
     vault-schema — [vault-work, reflection]
     routing-state — [routing] — write to express preferred harness for future turns
 
-  SKILLS (read via vault_read when relevant):
-    Access skills documents at relative path '../skills/{skill}/SKILL.md'
-    from the vault root. Use skills as warm knowledge for: onboarding,
-    memory maintenance, introspection, and prediction review.
+  SKILLS:
+    Use list_skills to discover available skills. Use read_skill(name) to load
+    documentation. Use write_skill(name, content) to create skills from repeated
+    workflows. New skills start as status: draft.

@@ -55,17 +55,50 @@ def _read_routing_state() -> str | None:
 
 async def _event_worker(queue: asyncio.Queue, discord_bridge: DiscordBridge | None, default_harness: str):
     """Process events from the queue one at a time."""
+    import json
     while True:
         event: AgentEvent = await queue.get()
 
         try:
             prior_size = MESSAGES_LOG.stat().st_size if MESSAGES_LOG.exists() else 0
 
+            # Step 9: Compute conversation_id
+            if event.event_type == "scheduler_tick":
+                event.conversation_id = f"scheduler:{event.scheduler_name}" if event.scheduler_name else "scheduler:unknown"
+            elif event.source_platform == "cli" or not event.source_platform:
+                event.conversation_id = "cli"
+                event.source_platform = "cli"
+
+            # (a) write conversation context to turn state file
+            turn_state_path = HOME / "logs" / ".turn_state.json"
+            turn_state_path.parent.mkdir(parents=True, exist_ok=True)
+            turn_state = {"count": 0, "messages": []}
+            if turn_state_path.exists():
+                try:
+                    turn_state = json.loads(turn_state_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            
+            turn_state["conversation_id"] = event.conversation_id
+            turn_state["author"] = event.author
+            turn_state["author_id"] = f"{event.source_platform}:{event.author_id}" if event.author_id else None
+            turn_state["platform"] = event.source_platform
+            
+            turn_state_path.write_text(json.dumps(turn_state), encoding="utf-8")
+
             event_text = event.prompt
             if event.source_platform == "discord" and event.author:
                 event_text = f"[from: {event.author} on discord (id: {event.author_id})]\n{event.prompt}"
 
-            prompt = build_prompt(event_text, tick_type=event.tick_type)
+            # Step 8(b): Update build_prompt call
+            prompt = build_prompt(
+                event_text, 
+                tick_type=event.tick_type,
+                conversation_id=event.conversation_id,
+                author=event.author,
+                author_id=f"{event.source_platform}:{event.author_id}" if event.author_id else None,
+                participant_ids=event.participant_ids
+            )
             harness = _get_harness(event, default_harness)
 
             print(f"[coordinator] Processing {event.event_type} via {harness}", flush=True)

@@ -48,6 +48,7 @@ def inbox_add(text: str) -> None:
         "from": "Cyrus",
         "text": text,
         "read": False,
+        "conversation_id": "cli",
     }
     with open(INBOX_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
@@ -175,7 +176,27 @@ def main() -> None:
         if not args.message:
             print("Usage: dot say \"message\"", file=sys.stderr)
             sys.exit(1)
-        prompt = build_prompt(args.message, tick_type="admin_message")
+
+        # Write conversation context for skills to read
+        turn_state_path = HOME / "logs" / ".turn_state.json"
+        turn_state_path.parent.mkdir(parents=True, exist_ok=True)
+        turn_state = {
+            "count": 0, 
+            "messages": [], 
+            "conversation_id": "cli", 
+            "author": "Cyrus", 
+            "author_id": "cli:cyrus", 
+            "platform": "cli"
+        }
+        turn_state_path.write_text(json.dumps(turn_state), encoding="utf-8")
+
+        prompt = build_prompt(
+            args.message, 
+            tick_type="admin_message",
+            conversation_id="cli",
+            author="Cyrus",
+            author_id="cli:cyrus"
+        )
         if args.harness == "gemini":
             invoke_gemini(prompt)
         else:
@@ -183,18 +204,44 @@ def main() -> None:
 
     # ── tick ──
     elif args.command == "tick":
-        prompt = build_prompt("", tick_type="operational_check")
+        # Write context
+        turn_state_path = HOME / "logs" / ".turn_state.json"
+        turn_state_path.parent.mkdir(parents=True, exist_ok=True)
+        turn_state = {
+            "count": 0, 
+            "messages": [], 
+            "conversation_id": "cli", 
+            "author": "Cyrus", 
+            "author_id": "cli:cyrus", 
+            "platform": "cli"
+        }
+        turn_state_path.write_text(json.dumps(turn_state), encoding="utf-8")
+
+        prompt = build_prompt("", tick_type="operational_check", conversation_id="cli")
         invoke_claude(prompt)
 
     # ── reflect ──
     elif args.command == "reflect":
-        prompt = build_prompt("", tick_type="deep_reflection")
+        # Write context
+        turn_state_path = HOME / "logs" / ".turn_state.json"
+        turn_state_path.parent.mkdir(parents=True, exist_ok=True)
+        turn_state = {
+            "count": 0, 
+            "messages": [], 
+            "conversation_id": "cli", 
+            "author": "Cyrus", 
+            "author_id": "cli:cyrus", 
+            "platform": "cli"
+        }
+        turn_state_path.write_text(json.dumps(turn_state), encoding="utf-8")
+
+        prompt = build_prompt("", tick_type="deep_reflection", conversation_id="cli")
         invoke_claude(prompt)
 
     # ── dry-run ──
     elif args.command == "dry-run":
         event = args.message or ""
-        prompt = build_prompt(event, tick_type=args.tick_type)
+        prompt = build_prompt(event, tick_type=args.tick_type, conversation_id="cli")
         print(prompt)
 
     # ── inbox ──

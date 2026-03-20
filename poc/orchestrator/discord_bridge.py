@@ -21,16 +21,35 @@ class DiscordBridge(discord.Client):
         self.phone_book = PhoneBook(vault_dir)
         self._reply_channels: dict[str, int] = {}  # correlation: channel_id
         self._last_channel_id: int | None = None
+        self._channel_members: dict[int, list[str]] = {}  # channel_id: [participant_ids]
 
     async def on_ready(self):
         print(f"[discord] Logged in as {self.user}")
         # Update from guilds
         for guild in self.guilds:
             self.phone_book.update_from_guild(guild)
+            # Update member cache for all text channels in this guild
+            for channel in guild.text_channels:
+                self._update_member_cache(channel)
+
         # Update from all users the bot can see (captures DM-only contacts if cached)
         for user in self.users:
             self.phone_book.update_from_dm(user)
         self.phone_book.render()
+
+    def _update_member_cache(self, channel):
+        """Update the list of participant IDs for a channel, excluding the bot."""
+        if hasattr(channel, "members"):
+            self._channel_members[channel.id] = [
+                f"discord:{member.id}"
+                for member in channel.members
+                if member.id != self.user.id
+            ]
+
+    async def on_member_join(self, member):
+        """Update cache when someone joins a guild."""
+        for channel in member.guild.text_channels:
+            self._update_member_cache(channel)
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
@@ -47,6 +66,19 @@ class DiscordBridge(discord.Client):
         # Use a simple last-channel-wins approach for now
         self._last_channel_id = message.channel.id
 
+        # Compute conversation_id and participant_ids
+        conversation_id = None
+        participant_ids = []
+        if isinstance(message.channel, discord.DMChannel):
+            conversation_id = f"discord:dm:{message.author.id}"
+            participant_ids = [f"discord:{message.author.id}"]
+        elif hasattr(message.channel, "guild"):
+            conversation_id = f"discord:ch:{message.channel.id}"
+            # Refresh cache if not present
+            if message.channel.id not in self._channel_members:
+                self._update_member_cache(message.channel)
+            participant_ids = self._channel_members.get(message.channel.id, [])
+
         event = AgentEvent(
             event_type="discord_message",
             prompt=message.content,
@@ -57,6 +89,8 @@ class DiscordBridge(discord.Client):
             attachment_names=[a.filename for a in message.attachments],
             tick_type="admin_message",
             source_platform="discord",
+            conversation_id=conversation_id,
+            participant_ids=participant_ids,
         )
         await self.event_queue.put(event)
 

@@ -5,7 +5,11 @@ Claude Code launches this as a subprocess via --mcp-config.
 
 import json
 import os
+import re
+import subprocess
 import sys
+import time
+import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +22,7 @@ HOME_DIR = Path(os.environ.get("DOT_HOME", ".")).resolve()
 BLOCKS_DIR = HOME_DIR / "blocks"
 LOGS_DIR = HOME_DIR / "logs"
 VAULT_DIR = HOME_DIR / "vault"
+SKILLS_DIR = HOME_DIR / "skills"
 TURN_STATE_PATH = LOGS_DIR / ".turn_state.json"
 
 server = Server("dot-tools")
@@ -304,16 +309,56 @@ async def list_tools():
         ),
         Tool(
             name="search_messages",
-            description="Search Dot's outgoing messages (messages.jsonl) by keyword and/or date range. Use this for verbatim context of what was said in prior conversations.",
+            description="Search Dot's outgoing messages (messages.jsonl) by keyword, date range, and/or conversation_id. Use this for verbatim context of what was said in prior conversations.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Text to search for (case-insensitive). Omit to return all entries in range."},
+                    "conversation_id": {"type": "string", "description": "Filter by conversation_id (default 'cli' for matches without field)."},
                     "since": {"type": "string", "description": "ISO date string (YYYY-MM-DD or full ISO timestamp). Only return entries at or after this time."},
                     "until": {"type": "string", "description": "ISO date string (YYYY-MM-DD or full ISO timestamp). Only return entries at or before this time."},
                     "limit": {"type": "integer", "description": "Maximum number of entries to return (default 20).", "default": 20},
                 },
                 "required": [],
+            },
+        ),
+        Tool(
+            name="list_skills",
+            description="List available skills. Parses YAML frontmatter for name, description, and status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "show_archived": {
+                        "type": "boolean",
+                        "description": "Whether to include archived skills in the listing.",
+                        "default": False,
+                    }
+                },
+            },
+        ),
+        Tool(
+            name="read_skill",
+            description="Read a skill's documentation file (defaults to SKILL.md).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Skill directory name (alphanumeric/hyphens/underscores)."},
+                    "file": {"type": "string", "description": "Specific file to read (default SKILL.md).", "default": "SKILL.md"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="write_skill",
+            description="Create or update a skill. Validates frontmatter for name and description.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Skill directory name."},
+                    "content": {"type": "string", "description": "Full markdown content with YAML frontmatter."},
+                    "file": {"type": "string", "description": "Filename (default SKILL.md).", "default": "SKILL.md"},
+                },
+                "required": ["name", "content"],
             },
         ),
         Tool(
@@ -350,6 +395,12 @@ async def call_tool(name: str, arguments: dict):
         return await handle_journal(arguments)
     elif name == "list_blocks":
         return await handle_list_blocks(arguments)
+    elif name == "list_skills":
+        return await handle_list_skills(arguments)
+    elif name == "read_skill":
+        return await handle_read_skill(arguments)
+    elif name == "write_skill":
+        return await handle_write_skill(arguments)
     elif name == "read_inbox":
         return await handle_read_inbox(arguments)
     elif name == "schedule_job":
@@ -382,6 +433,7 @@ async def handle_send_message(args: dict):
     state = _read_turn_state()
     count = state.get("count", 0)
     messages = state.get("messages", [])
+    conversation_id = state.get("conversation_id", "cli")
 
     # Hard limit
     if count >= 10:
@@ -405,6 +457,7 @@ async def handle_send_message(args: dict):
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "type": "outbound_message",
         "text": text,
+        "conversation_id": conversation_id,
     }
     with log_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
@@ -428,29 +481,24 @@ async def handle_read_block(args: dict):
     return [TextContent(type="text", text=content)]
 
 
-def _git_commit_block(name: str, block_path: Path):
-    import subprocess
-    repo_root = block_path.parent.parent
+def _git_commit_file(message: str, file_path: Path):
+    repo_root = HOME_DIR
     try:
-        # git -C {block_path.parent.parent} add {block_path}
         subprocess.run(
-            ["git", "-C", str(repo_root), "add", str(block_path)],
+            ["git", "-C", str(repo_root), "add", str(file_path)],
             capture_output=True,
             text=True
         )
-        # git -C {block_path.parent.parent} commit -m 'block: update {name}'
         subprocess.run(
-            ["git", "-C", str(repo_root), "commit", "-m", f"block: update {name}"],
+            ["git", "-C", str(repo_root), "commit", "-m", message],
             capture_output=True,
             text=True
         )
     except Exception as e:
-        print(f"Git commit failed for block '{name}': {e}", file=sys.stderr)
+        print(f"Git commit failed: {e}", file=sys.stderr)
 
 
 async def handle_write_block(args: dict):
-    import yaml
-
     name = args.get("name", "").strip()
     text = args.get("text", "")
     tier = args.get("tier", "hot")
@@ -471,7 +519,7 @@ async def handle_write_block(args: dict):
     path = BLOCKS_DIR / f"{name}.yaml"
     path.write_text(yaml.safe_dump(block, sort_keys=False), encoding="utf-8")
 
-    _git_commit_block(name, path)
+    _git_commit_file(f"block: update {name}", path)
 
     return [TextContent(type="text", text=f"Block '{name}' written.")]
 
@@ -495,7 +543,6 @@ async def handle_list_blocks(args: dict):
     if not BLOCKS_DIR.exists():
         return [TextContent(type="text", text="No blocks directory found")]
 
-    import yaml
     hot_blocks = []
     warm_blocks = []
 
@@ -537,12 +584,99 @@ async def handle_list_blocks(args: dict):
     return [TextContent(type="text", text="\n".join(output))]
 
 
+async def handle_list_skills(args: dict):
+    if not SKILLS_DIR.exists():
+        return [TextContent(type="text", text="No skills directory found")]
+
+    show_archived = args.get("show_archived", False)
+    skills = []
+
+    for skill_path in sorted(SKILLS_DIR.iterdir()):
+        if not skill_path.is_dir():
+            continue
+
+        skill_file = skill_path / "SKILL.md"
+        if not skill_file.exists():
+            continue
+
+        try:
+            content = skill_file.read_text(encoding="utf-8")
+            frontmatter, _ = _parse_vault_note(content)
+
+            name = frontmatter.get("name", skill_path.name)
+            description = frontmatter.get("description", "No description")
+            status = frontmatter.get("status", "active")
+
+            if status == "archived":
+                if show_archived:
+                    skills.append(f"- {name}: {description} [archived]")
+            else:
+                skills.append(f"- {name}: {description} [status: {status}]")
+        except Exception as e:
+            skills.append(f"- {skill_path.name}: (error reading: {e})")
+
+    if not skills:
+        return [TextContent(type="text", text="No skills found")]
+
+    return [TextContent(type="text", text="Available skills:\n" + "\n".join(skills))]
+
+
+async def handle_read_skill(args: dict):
+    name = args.get("name", "").strip()
+    filename = args.get("file", "SKILL.md").strip()
+
+    if not re.match(r"^[a-zA-Z0-9\-_]+$", name):
+        return [TextContent(type="text", text="Error: invalid skill name (use alphanumeric, hyphens, underscores)")]
+
+    skill_path = (SKILLS_DIR / name / filename).resolve()
+    
+    # Path traversal check
+    if not str(skill_path).startswith(str(SKILLS_DIR.resolve())):
+        return [TextContent(type="text", text="Error: invalid file path")]
+
+    if not skill_path.exists():
+        return [TextContent(type="text", text=f"Error: skill file not found: {name}/{filename}")]
+
+    return [TextContent(type="text", text=skill_path.read_text(encoding="utf-8"))]
+
+
+async def handle_write_skill(args: dict):
+    name = args.get("name", "").strip()
+    content = args.get("content", "")
+    filename = args.get("file", "SKILL.md").strip()
+
+    if not re.match(r"^[a-zA-Z0-9\-_]+$", name):
+        return [TextContent(type="text", text="Error: invalid skill name")]
+
+    skill_dir = SKILLS_DIR / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+
+    skill_path = (skill_dir / filename).resolve()
+    
+    # Path traversal check
+    if not str(skill_path).startswith(str(SKILLS_DIR.resolve())):
+        return [TextContent(type="text", text="Error: invalid file path")]
+
+    if filename == "SKILL.md":
+        frontmatter, body = _parse_vault_note(content)
+        if "name" not in frontmatter or "description" not in frontmatter:
+            return [TextContent(type="text", text="Error: SKILL.md must have 'name' and 'description' in frontmatter")]
+
+        if "status" not in frontmatter:
+            frontmatter["status"] = "draft"
+            # Reconstruct content with updated frontmatter
+            content = "---\n" + yaml.safe_dump(frontmatter, sort_keys=False).strip() + "\n---\n\n" + body.strip()
+
+    skill_path.write_text(content, encoding="utf-8")
+
+    _git_commit_file(f"skill: update {name}/{filename}", skill_path)
+
+    return [TextContent(type="text", text=f"Skill '{name}/{filename}' written.")]
+
+
 # --- Vault Tools ---
 
 def _parse_vault_note(content: str):
-    import yaml
-    import re
-
     frontmatter = {}
     body = content
     if content.startswith("---"):
@@ -578,7 +712,6 @@ async def handle_vault_read(args: dict):
 
 
 async def handle_vault_write(args: dict):
-    import yaml
     path_str = args.get("path", "").strip()
     content = args.get("content", "")
     overwrite = args.get("overwrite", False)
@@ -624,7 +757,6 @@ async def handle_vault_append(args: dict):
     today = datetime.now().strftime("%Y-%m-%d")
     frontmatter["modified"] = today
 
-    import yaml
     new_body = body.rstrip() + "\n\n" + content_to_append.strip()
     full_content = "---\n" + yaml.safe_dump(frontmatter, sort_keys=False).strip() + "\n---\n\n" + new_body
     path.write_text(full_content, encoding="utf-8")
@@ -671,7 +803,6 @@ async def handle_vault_rename(args: dict):
 
 
 async def handle_vault_search(args: dict):
-    import subprocess
     query = args.get("query", "")
     type_filter = args.get("type_filter")
     tag_filter = args.get("tag_filter")
@@ -720,8 +851,6 @@ async def handle_vault_search(args: dict):
 
 
 async def handle_vault_backlinks(args: dict):
-    import subprocess
-    import re
     path_str = args.get("path", "").strip()
     if not path_str:
         return [TextContent(type="text", text="Error: path is required")]
@@ -779,7 +908,6 @@ async def handle_vault_list(args: dict):
 _stats_cache = {"time": 0, "data": None}
 
 async def handle_vault_stats(args: dict):
-    import time
     now = time.time()
     if _stats_cache["data"] and (now - _stats_cache["time"] < 300):
         return [TextContent(type="text", text=json.dumps(_stats_cache["data"], indent=2))]
@@ -906,7 +1034,6 @@ async def handle_read_inbox(args: dict):
 
 
 async def handle_schedule_job(args: dict):
-    import yaml
     name = args.get("name")
     trigger = args.get("trigger")
     tick_type = args.get("tick_type")
@@ -967,7 +1094,6 @@ async def handle_schedule_job(args: dict):
 
 
 async def handle_unschedule_job(args: dict):
-    import yaml
     name = args.get("name")
     if not name:
         return [TextContent(type="text", text="Error: name is required")]
@@ -1063,6 +1189,7 @@ async def handle_search_messages(args: dict):
     since = args.get("since", "")
     until = args.get("until", "")
     limit = int(args.get("limit", 20))
+    conversation_id = args.get("conversation_id")
 
     entries = []
     for line in messages_path.read_text(encoding="utf-8").splitlines():
@@ -1085,6 +1212,12 @@ async def handle_search_messages(args: dict):
             filtered.append(entry)
         entries = filtered
 
+    if conversation_id:
+        entries = [
+            e for e in entries
+            if e.get("conversation_id", "cli") == conversation_id
+        ]
+
     if query:
         entries = [e for e in entries if query in e.get("text", "").lower()]
 
@@ -1093,10 +1226,13 @@ async def handle_search_messages(args: dict):
     if not entries:
         return [TextContent(type="text", text="(no matching messages)")]
 
-    rendered = [
-        f"timestamp: {e.get('timestamp', '?')}\n{e.get('text', '')}"
-        for e in entries
-    ]
+    rendered = []
+    for e in entries:
+        msg_header = f"timestamp: {e.get('timestamp', '?')}"
+        if "conversation_id" in e:
+            msg_header += f" [conv: {e['conversation_id']}]"
+        rendered.append(f"{msg_header}\n{e.get('text', '')}")
+
     return [TextContent(type="text", text="\n\n---\n\n".join(rendered))]
 
 

@@ -118,8 +118,11 @@ class DiscordBridge(discord.Client):
             if message.channel.id not in server_channels:
                 return False
             mention_only = allowed.get("mention_only", True)
-            if mention_only and self.user not in message.mentions:
-                return False
+            if mention_only:
+                bot_id = self.user.id
+                mentioned = any(u.id == bot_id for u in message.mentions)
+                if not mentioned:
+                    return False
             return True
 
         return False

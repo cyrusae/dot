@@ -59,7 +59,13 @@ class DiscordBridge(discord.Client):
         if self.phone_book.update_from_dm(message.author):
             self.phone_book.render()
 
+        print(f"[discord] on_message: channel={message.channel} ({type(message.channel).__name__}) "
+              f"author={message.author} mentions={[u.id for u in message.mentions]} "
+              f"bot_id={self.user.id if self.user else None} "
+              f"content_preview={message.content[:50]!r}", flush=True)
+
         if not self._should_process(message):
+            print(f"[discord] _should_process returned False, skipping", flush=True)
             return
 
         # Store reply channel for routing responses back
